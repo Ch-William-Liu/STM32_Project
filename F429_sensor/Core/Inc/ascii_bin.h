@@ -3,6 +3,6 @@
 
 #include <stddef.h>
 
-void ascii_to_binary_string(const char *ascii , char *out , size_t out_size);
+void ascii_to_binary_string_no_space(const char *ascii , char *out , size_t out_size);
 
 #endif

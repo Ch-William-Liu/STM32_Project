@@ -54,11 +54,10 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 GY87_Addr_t gy87_addr = {.mpu_addr_7bit = 0x68, .mag_addr_7bit = 0x1E};
 GY87_Data_t gy87_data;
+uint16_t msgID = 0;
+char rawStr[256];
+char binStr[200 * 8 + 1];
 
-char payload[256];
-char binstr[2048];
-
-uint32_t msg_id = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,26 +106,50 @@ int main(void)
   MX_I2C1_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  const char boot_msg[] = "BOOT\r\n";
-  HAL_UART_Transmit(&huart3, (uint8_t*)boot_msg, strlen(boot_msg), HAL_MAX_DELAY);
-  /* USER CODE END 2 */
-
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+	    /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-    const char msg[] = "UART OK\r\n";
+	    /* USER CODE BEGIN 3 */
+	    printf("---\r\n");
+	    printf("msgID = %03u\r\n" , msgID);
 
-    HAL_UART_Transmit(&huart3 , (uint8_t*)msg , strlen(msg),HAL_MAX_DELAY);
+	    printf("Raw:\r\n");
 
-    HAL_GPIO_TogglePin(GPIOA , GPIO_PIN_5);
+	    if (GY87_Read(&hi2c1 , gy87_addr , &gy87_data) == HAL_OK)
+	    {
+	      snprintf(rawStr , sizeof(rawStr),
+	      "ax=%d; ay=%d; az=%d; gx=%d; gy=%d; gz=%d; ax=%d; ay=%d; az=%d; mx=%d; my=%d; mz=%d; temp=%d;",
+	      gy87_data.mpu.ax, gy87_data.mpu.ay, gy87_data.mpu.az,
+	      gy87_data.mpu.gx, gy87_data.mpu.gy, gy87_data.mpu.gz,
+	      gy87_data.mag.mx, gy87_data.mag.my, gy87_data.mag.mz,
+	      gy87_data.mpu.temp_raw
+	    );
 
-    HAL_Delay(200);
+	    printf("%s\r\n" , rawStr);
+
+	    ascii_to_binary_string_no_space(rawStr, binStr, sizeof(binStr));
+
+	    printf("Binary:\r\n");
+	    printf("%s\r\n" , binStr);
+	    } // end if
+	    else
+	    {
+	      printf("GY87 read error \r\n");
+	    } // end else
+
+	    printf("---\r\n");
+
+	    msgID++;
+
+	    if (msgID >= 1000) msgID = 0;
+	    HAL_Delay(200);
+
   }
   /* USER CODE END 3 */
 }
@@ -260,24 +283,12 @@ static void MX_USART3_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
-
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PA5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
