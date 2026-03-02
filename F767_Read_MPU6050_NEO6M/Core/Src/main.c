@@ -273,6 +273,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   } // end if
 } // end function HAL_UART_RxCpltCallback
 
+static void i2c_scan_print(void)
+{
+  printf("I2C scan start...\r\n");
+  for (uint8_t addr = 1; addr < 127; addr++)
+  {
+    if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(addr << 1) , 2 , 20) == HAL_OK)
+    {
+      printf("  Found device at 0x%02X.\r\n");
+    } // end if
+  } // end for
+} // end function i2c_scan_print
 /* USER CODE END 0 */
 
 /**
@@ -315,7 +326,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   printf("\r\n=== Stage 3: MPU6050(I2C) + NEO-6M(USART2) Monitor (USART3 -> PuTTy) === \r\n");
   printf("Print period: 0.5 s | LD2 toggles every print.\r\n");
-
+  i2c_scan_print();
   // Init MPU6050
   if (mpu6050_init())
   {
@@ -323,7 +334,7 @@ int main(void)
   } // end if 
   else
   {
-    printf("MPU6050 init FAIL: (checl I2C wiring/address)\r\n");
+    printf("MPU6050 init FAIL: (check I2C wiring/address)\r\n");
 
     // Start GPS Rx interrupt (USART2)
     gps_start_rx_it();
