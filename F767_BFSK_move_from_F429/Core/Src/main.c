@@ -1,5 +1,5 @@
 /* USER CODE BEGIN Header */
-/* F767_BFSK_DDS */
+/* F767_BFSK_move_from_F429 */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -23,8 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,16 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LUT_SIZE          64U
-#define MAX_ASCII_LEN     64U
-#define MAX_BITS          (MAX_ASCII_LEN * 8U)
 
-#define BIT_MS            10U
-#define GAP_MS            500U
-
-#define DAC_ZERO_12B      0U
-
-#define DDS_FS_HZ         938967U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,6 +63,7 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 ETH_TxPacketConfig TxConfig;
 
 DAC_HandleTypeDef hdac;
+DMA_HandleTypeDef hdma_dac1;
 
 ETH_HandleTypeDef heth;
 
@@ -82,49 +74,139 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
-static const uint16_t sineLUT[LUT_SIZE] = {
-  2048,2249,2447,2642,2831,3013,3185,3346,
-  3495,3630,3750,3853,3939,4007,4056,4085,
-  4095,4085,4056,4007,3939,3853,3750,3630,
-  3495,3346,3185,3013,2831,2642,2447,2249,
-  2048,1846,1648,1453,1264,1082, 910, 749,
-   600, 465, 345, 242, 156,  88,  39,  10,
-     0,  10,  39,  88, 156, 242, 345, 465,
-   600, 749, 910,1082,1264,1453,1648,1846
+#define TABLE_SIZE        32U
+#define BIT_MS            10U
+#define PRE_HIGH_MS       50U
+#define PRE_ZERO_MS       50U
+#define POST_ZERO_MS      50U
+#define GAP_MS            200U
+
+// choose which BFSK pair you want
+typedef enum
+{
+  PAIR_30_31 = 0,
+  PAIR_45_46 = 1,
+} FreqPair;
+
+static volatile FreqPair g_pair = PAIR_30_31;         // <- change this to change the output frequency pair
+
+#define DAC_Vrev_V        3.34f
+#define DAC_FULLSCALE     4095.0f
+#define DAC_1V68_CODE     ((uint16_t)((1.68f / DAC_Vrev_V) * DAC_FULLSCALE))
+
+static const uint16_t sineTable[TABLE_SIZE] = {
+  2048,2447,2831,3185,3495,3750,3939,4056,
+  4095,4056,3939,3750,3495,3185,2831,2447,
+  2048,1648,1264, 910, 600, 345, 156,  39,
+  0,  39, 156, 345, 600, 910,1264,1648
 };
 
-typedef enum {PAIR_30_31 = 0, PAIR_45_46 = 1} FreqPair_t;
-static volatile FreqPair_t g_pair = PAIR_45_46;
+// Tx framing state machine
+typedef enum {
+  ST_PRE_HIGH = 0,
+  ST_PRE_ZERO,
+  ST_DATA,
+  ST_POST_ZERO,
+  ST_GAP
+} TxState;
 
-static volatile uint32_t g_f0_hz = 45000U;    // bit 0 -> low
-static volatile uint32_t g_f1_hz = 46000U;    // bit 1
+static TxState st = ST_PRE_HIGH;
+static uint32_t stTick = 0;
+static uint32_t lastBitTick = 0;
+static uint32_t bitIndex = 0;
 
-static const char userText[MAX_ASCII_LEN + 1] = "test";
+// Data buffet : ASCII --> bit string
+#define MAX_ASCII_LEN     64U
+#define MAX_BIT_LEN       (MAX_ASCII_LEN * 8)
 
-static char bitString[MAX_BITS + 1];
-static uint32_t bitLen = 0;
+static const char userText[MAX_ASCII_LEN + 1] = "AMAC";       // change text here
+static char bitString[MAX_BIT_LEN + 1];
 
-// DDS phase accumulator (Q32)
-static volatile uint32_t phase_acc = 0;
-static volatile uint32_t phase_inc = 0;
+static uint32_t tim6_clk_hz = 0;
 
-// state machine
-typedef enum {ST_DATA = 0, ST_GAP} TxState_t;
-static volatile TxState_t g_state = ST_DATA;
-static uint32_t g_t0_ms = 0;
-static uint32_t g_bit_idx = 0;
+// build bit string from ascii
+static void ascii_to_bits(const char *in, char *out, size_t out_cap)
+{
+  size_t w = 0;
+  for (size_t i = 0; in[i] != '\0'; i++)
+  {
+    uint8_t c = (uint8_t)in[i];
+    for (int b = 7; b >= 0; b--)
+    {
+      if (w + 1 >= out_cap) {out[w] = '\0'; return;}
+      out[w++] = ((c >> b) & 1U) ? '1' : '0';
+    } // end for
+  } // end for
+} // end function ascii_to_bits
 
-// For timing BIT_MS based on sample ticks
-static volatile uint32_t samp_tick = 0;
-static uint32_t samples_per_bit = 0;
-static uint32_t samples_per_gap = 0;
-static uint32_t state_samp0 = 0;
+// read TIM6 timer clock (APB1 timer clock)
+static uint32_t get_tim6_clock_hz(void)
+{
+  // Cube/HAL: PCLK1 may be divided; timer clock doubles if APB prescaler != 1
+  uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+  uint32_t ppre1 = (RCC->CFGR & RCC_CFGR_PPRE1) >> RCC_CFGR_PPRE1_Pos;
+  uint32_t apb1_presc = (ppre1 < 4U) ? 1U  : (1U << (ppre1 - 3U));
+  return (apb1_presc == 1U) ? pclk1 : (2U * pclk1);
+} // end function get_tim6_clock_hz
+
+// pick f0/f1 based on pair
+static inline uint32_t pair_f0_hz(FreqPair p) {return (p == PAIR_30_31) ? 30000U : 45000U;}
+static inline uint32_t pair_f1_hz(FreqPair p) {return (p == PAIR_30_31) ? 31000U : 46000U;}
+
+// Core: compute ARR for desired f_out with TABLE_SIZE samples/cycle
+static uint32_t calc_arr_for_fout(uint32_t fout_hz)
+{
+  // f_update = f_out * TABLE_SIZE
+  uint32_t f_update = fout_hz * TABLE_SIZE;
+
+  uint32_t psc = htim6.Init.Prescaler;    // using CubeMX PSC
+  if (f_update == 0U) f_update = 1U;
+
+  // ARR = tim_clk / ((PSC + 1) * f_update) - 1
+  uint32_t arr = (tim6_clk_hz / ((psc + 1U) * f_update));
+  if (arr > 0U) arr -= 1U;
+
+  // guardrails
+  if (arr < 1U) arr = 1U;
+  if (arr > 0xFFFFU) arr = 0xFFFFU;
+
+  return arr;
+} // end function cal_arr_for_fout
+
+// Core: apply arr safely (dynamic)
+static void tim6_set_arr(uint32_t arr)
+{
+  __HAL_TIM_DISABLE(&htim6);
+  __HAL_TIM_SET_AUTORELOAD(&htim6 , arr);
+  __HAL_TIM_SET_COUNTER(&htim6 , 0);
+
+  // Force register reload immediately
+  HAL_TIM_GenerateEvent(&htim6 , TIM_EVENTSOURCE_UPDATE);
+
+  __HAL_TIM_ENABLE(&htim6);
+} // end function tim6_set_arr
+
+// Core: Set frequency from one bit ('0'/'1')
+static void set_symbol_freq(char b)
+{
+  uint32_t f = (b == '0') ? pair_f0_hz(g_pair) : pair_f1_hz(g_pair);
+  uint32_t arr = calc_arr_for_fout(f);
+  tim6_set_arr(arr);
+} // end function set_symbol_freq
+
+static TxState st_prev = 0xFF;
+static inline uint8_t is_enter_start (TxState s)
+{
+  if (st != st_prev) {st_prev = st; return 1;}
+  return 0;
+} // end function is_enter_start
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_DAC_Init(void);
 static void MX_ETH_Init(void);
 static void MX_TIM6_Init(void);
@@ -136,102 +218,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void set_pair(FreqPair_t pair)
-{
-  g_pair = pair;
-  if (pair == PAIR_30_31) {g_f0_hz = 30000U; g_f1_hz = 31000U;}
-  else                    {g_f0_hz = 45000U; g_f1_hz = 46000U;}
-} // end function set_pair
 
-static void ascii_to_bits(const char *s, char *out, uint32_t outMax, uint32_t *outLen)
-{
-  uint32_t n = 0;
-  while (*s && (n + 8U) < outMax)
-  {
-    uint8_t c = (uint8_t)(*s++);
-    for (int b = 7; b >= 0; b--)
-    {
-      out[n++] = ((c >> b) & 1U) ? '1' : '0';
-    } // end for
-  } // end while
-  out[n] = '\0';
-  *outLen = n;
-} // end function ascii_to_bits
-
-//Q32 phase increment = f_out / Fs *2^32
-static uint32_t calc_phase_inc(uint32_t f_hz)
-{
-  // use 64-bit to avoid overflow
-  uint64_t num = (uint64_t)f_hz << 32;
-  return (uint32_t)(num / (uint64_t)DDS_FS_HZ);
-} // end function calc_phase_inc
-
-static void set_bit_freq(uint8_t bit01)
-{
-  uint32_t f = (bit01 == 0) ? g_f0_hz : g_f1_hz;
-  phase_inc = calc_phase_inc(f);
-} // end function ser_bit_freq
-
-// TIM6 ISR: DDS update
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  if (htim->Instance == TIM6)
-  {
-    // DEBUG
-    static uint32_t dbg = 0;
-    dbg++;
-    if (dbg % 200000 == 0)
-    {
-      HAL_GPIO_TogglePin(GPIOB , LD2_Pin);
-    }
-
-
-    samp_tick++;
-
-    if (g_state == ST_DATA)
-    {
-      // DDS phase update
-      phase_acc += phase_inc;
-      uint32_t idx = (phase_acc >> 26) & (LUT_SIZE - 1U); // top 6 bits for 64 entries
-      DAC->DHR12R1 = sineLUT[idx];
-
-      // bit timing based on sample count
-      if ((samp_tick - state_samp0) >= samples_per_bit)
-      {
-        state_samp0 = samp_tick;
-        g_bit_idx++;
-
-        if (g_bit_idx >= bitLen)
-        {
-          // enter GAP
-          g_state = ST_GAP;
-          state_samp0 = samp_tick;
-          DAC->DHR12R1 = 0;
-        } // end if
-        else
-        {
-          set_bit_freq((bitString[g_bit_idx] == '1') ? 1U : 0U);
-        } // end else
-      } // end if 
-    } // end if 
-    else // ST_GAP
-    {
-      // keep silent
-      DAC->DHR12R1 = 0;
-
-      if ((samp_tick - state_samp0) >= samples_per_gap)
-      {
-        // restart frame
-        g_state = ST_DATA;
-        g_bit_idx = 0;
-        state_samp0 = samp_tick;
-        phase_acc = 0;
-        
-        if (bitLen > 0) set_bit_freq((bitString[0] == '1') ? 1U : 0U);
-      }
-    } // end else
-  } // end if
-} // end function HAL_TIM_PeriodElapsedCallback
 /* USER CODE END 0 */
 
 /**
@@ -266,49 +253,169 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_DAC_Init();
   MX_ETH_Init();
   MX_TIM6_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
-  set_pair(PAIR_45_46);
 
-  ascii_to_bits(userText , bitString , sizeof(bitString) , &bitLen);
+  // 1) build bit string once
+  ascii_to_bits(userText , bitString , sizeof(bitString));
 
-  // sample-based timing
-  samples_per_bit = (DDS_FS_HZ * BIT_MS) / 1000U;
-  samples_per_gap = (DDS_FS_HZ * GAP_MS) / 1000U;
+  // 2) start DAC with DMA (circular waveform table)
+  HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t*)sineTable , TABLE_SIZE , DAC_ALIGN_12B_R);
 
-  g_state = ST_DATA;
-  g_bit_idx = 0;
-  samp_tick = 0;
-  state_samp0 = 0;
-  phase_acc = 0;
+  // 3) start TIM6 (TIM6 TGRO should trigger DAC)
+  HAL_TIM_Base_Start(&htim6);
 
-  if (bitLen > 0)
-  {
-    set_bit_freq((bitString[0] == '1') ? 1U : 0U);
-  } // end if
-  else
-  {
-    phase_inc = 0;
-  } // end else
+  // 4) cache timer clock for ARR calculation
+  tim6_clk_hz = get_tim6_clock_hz();
 
-  // Start DAC
-  HAL_DAC_Start(&hdac , DAC1_CHANNEL_1);
+  // 5) enter PRE_HIGH: disable timer updates, force DC 1.68V
+  __HAL_TIM_DISABLE(&htim6);
+  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , DAC_1V68_CODE);
 
-  HAL_TIM_Base_Start_IT(&htim6);
+  st = ST_PRE_HIGH;
+  stTick = HAL_GetTick();
+  lastBitTick = stTick;
+  bitIndex = 0;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    uint32_t now = HAL_GetTick();
+    switch (st)
+    {
+    case ST_PRE_HIGH:
+      if (is_enter_start(ST_PRE_HIGH))
+      {
+        __HAL_TIM_DISABLE(&htim6);          // ensure no trigger
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);    // (recommended) avoid DMA residue
+        HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , DAC_1V68_CODE);
+      } // end if 
+
+      if (now - stTick >= PRE_HIGH_MS)
+      {
+        st = ST_PRE_ZERO;
+        stTick = now;
+      } // end if 
+
+      break;
+
+    case ST_PRE_ZERO:
+      if (is_enter_start(ST_PRE_ZERO))
+      {
+        __HAL_TIM_DISABLE(&htim6);
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+        HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+      } // end if 
+
+      if (now - stTick >= PRE_ZERO_MS)
+      {
+        st = ST_DATA;
+        stTick = now;
+      } // end if 
+      break;
+
+    case ST_DATA:
+      if (is_enter_start(ST_DATA))
+      {
+        bitIndex = 0;
+        lastBitTick = now;
+
+        // 1) reset LUT/DMA pointer so DATA always from table[0]
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+        HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t*)sineTable , TABLE_SIZE , DAC_ALIGN_12B_R);
+
+        // 2) reset timer counter and enable
+        __HAL_TIM_SET_COUNTER(&htim6 , 0);
+        __HAL_TIM_ENABLE(&htim6);
+
+        // 3) set first symbol
+        if (bitString[0] == '\0')
+        {
+          __HAL_TIM_DISABLE(&htim6);
+          HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+          HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+
+          st = ST_POST_ZERO;
+          stTick = now;
+        } // end if 
+        else
+        {
+          set_symbol_freq(bitString[0]);
+        } // end else
+      } // end if
+      
+      // change frequency every BIT_MS
+
+      if (now - lastBitTick >= BIT_MS)
+      {
+        lastBitTick += BIT_MS;
+        bitIndex++;
+
+        char b = bitString[bitIndex];
+        if (b == '\0')
+        {
+          __HAL_TIM_DISABLE(&htim6);
+          HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+          HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+
+          st = ST_POST_ZERO;
+          stTick = now;
+        } // end if
+        else
+        {
+          set_symbol_freq(b);
+        } // end else
+      } // end if
+      break;
+
+    case ST_POST_ZERO:
+      if (is_enter_start(ST_POST_ZERO))
+      {
+        __HAL_TIM_DISABLE(&htim6);
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+        HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+      } // end if
+
+      if (now - stTick >= POST_ZERO_MS)
+      {
+        st = ST_GAP;
+        stTick = now;
+      } // end if
+      break;
+
+    case ST_GAP:
+      if (is_enter_start(ST_GAP))
+      {
+        __HAL_TIM_DISABLE(&htim6);
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+        HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+      } // end if
+
+      if (now - stTick >= GAP_MS)
+      {
+        st = ST_PRE_HIGH;
+        stTick = now;
+      } // end if
+      break;
+    
+    default:
+        __HAL_TIM_DISABLE(&htim6);
+        HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
+        HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+      break;
+    } // end switch
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+  } // end while
   /* USER CODE END 3 */
 }
 
@@ -397,7 +504,7 @@ static void MX_DAC_Init(void)
 
   /** DAC channel OUT1 config
   */
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
   sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
   if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
   {
@@ -478,7 +585,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 95;
+  htim6.Init.Period = 65535;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -563,6 +670,22 @@ static void MX_USB_OTG_FS_PCD_Init(void)
   /* USER CODE BEGIN USB_OTG_FS_Init 2 */
 
   /* USER CODE END USB_OTG_FS_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
 
 }
 

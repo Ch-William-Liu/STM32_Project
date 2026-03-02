@@ -1,5 +1,5 @@
 /* USER CODE BEGIN Header */
-/* F767_BFSK_DDS */
+/* F767_Read_MPU6050_NEO6M */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -23,7 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 /* USER CODE END Includes */
 
@@ -34,16 +35,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LUT_SIZE          64U
-#define MAX_ASCII_LEN     64U
-#define MAX_BITS          (MAX_ASCII_LEN * 8U)
 
-#define BIT_MS            10U
-#define GAP_MS            500U
-
-#define DAC_ZERO_12B      0U
-
-#define DDS_FS_HZ         938967U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -71,63 +63,26 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 
 ETH_TxPacketConfig TxConfig;
 
-DAC_HandleTypeDef hdac;
-
 ETH_HandleTypeDef heth;
 
-TIM_HandleTypeDef htim6;
+I2C_HandleTypeDef hi2c1;
 
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
-static const uint16_t sineLUT[LUT_SIZE] = {
-  2048,2249,2447,2642,2831,3013,3185,3346,
-  3495,3630,3750,3853,3939,4007,4056,4085,
-  4095,4085,4056,4007,3939,3853,3750,3630,
-  3495,3346,3185,3013,2831,2642,2447,2249,
-  2048,1846,1648,1453,1264,1082, 910, 749,
-   600, 465, 345, 242, 156,  88,  39,  10,
-     0,  10,  39,  88, 156, 242, 345, 465,
-   600, 749, 910,1082,1264,1453,1648,1846
-};
 
-typedef enum {PAIR_30_31 = 0, PAIR_45_46 = 1} FreqPair_t;
-static volatile FreqPair_t g_pair = PAIR_45_46;
-
-static volatile uint32_t g_f0_hz = 45000U;    // bit 0 -> low
-static volatile uint32_t g_f1_hz = 46000U;    // bit 1
-
-static const char userText[MAX_ASCII_LEN + 1] = "test";
-
-static char bitString[MAX_BITS + 1];
-static uint32_t bitLen = 0;
-
-// DDS phase accumulator (Q32)
-static volatile uint32_t phase_acc = 0;
-static volatile uint32_t phase_inc = 0;
-
-// state machine
-typedef enum {ST_DATA = 0, ST_GAP} TxState_t;
-static volatile TxState_t g_state = ST_DATA;
-static uint32_t g_t0_ms = 0;
-static uint32_t g_bit_idx = 0;
-
-// For timing BIT_MS based on sample ticks
-static volatile uint32_t samp_tick = 0;
-static uint32_t samples_per_bit = 0;
-static uint32_t samples_per_gap = 0;
-static uint32_t state_samp0 = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DAC_Init(void);
 static void MX_ETH_Init(void);
-static void MX_TIM6_Init(void);
+static void MX_I2C1_Init(void);
+static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
@@ -136,102 +91,188 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void set_pair(FreqPair_t pair)
-{
-  g_pair = pair;
-  if (pair == PAIR_30_31) {g_f0_hz = 30000U; g_f1_hz = 31000U;}
-  else                    {g_f0_hz = 45000U; g_f1_hz = 46000U;}
-} // end function set_pair
+extern I2C_HandleTypeDef hi2c1;
+extern UART_HandleTypeDef huart2;   // GPS
+extern UART_HandleTypeDef huart3;   // PuTTy monitor
 
-static void ascii_to_bits(const char *s, char *out, uint32_t outMax, uint32_t *outLen)
+// USART3 printf redirect
+int _write(int file, char *ptr, int len)
 {
-  uint32_t n = 0;
-  while (*s && (n + 8U) < outMax)
+  (void)file;
+  HAL_UART_Transmit(&huart3, (uint8_t*)ptr, (uint16_t)len, HAL_MAX_DELAY);
+  return len;
+} // end function _write
+
+// MPU6050 (I2C) minial driver
+#define MPU_ADDR_7_BIT    0x68
+#define MPU_ADDR          (MPU_ADDR_7_BIT << 1)
+
+#define MPU_REG_PWR_MGMT1   0x68
+#define MPU_REG_ACCEL_XOUT  0x3B
+
+typedef struct
+{
+  int16_t ax , ay , az;
+  int16_t gx , gy , gz;
+  int16_t temp_raw;
+  uint8_t ok;
+} mpu6050_t;
+
+
+static mpu6050_t mpu;
+
+// Initialize MPU6050
+static uint8_t mpu6050_init(void)
+{
+  uint8_t data = 0x00; // wake up
+  if (HAL_I2C_Mem_Write(&hi2c1 , MPU_ADDR , MPU_REG_PWR_MGMT1 , 1 , &data , 1 , 100) != HAL_OK)
   {
-    uint8_t c = (uint8_t)(*s++);
-    for (int b = 7; b >= 0; b--)
-    {
-      out[n++] = ((c >> b) & 1U) ? '1' : '0';
-    } // end for
-  } // end while
-  out[n] = '\0';
-  *outLen = n;
-} // end function ascii_to_bits
-
-//Q32 phase increment = f_out / Fs *2^32
-static uint32_t calc_phase_inc(uint32_t f_hz)
-{
-  // use 64-bit to avoid overflow
-  uint64_t num = (uint64_t)f_hz << 32;
-  return (uint32_t)(num / (uint64_t)DDS_FS_HZ);
-} // end function calc_phase_inc
-
-static void set_bit_freq(uint8_t bit01)
-{
-  uint32_t f = (bit01 == 0) ? g_f0_hz : g_f1_hz;
-  phase_inc = calc_phase_inc(f);
-} // end function ser_bit_freq
-
-// TIM6 ISR: DDS update
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  if (htim->Instance == TIM6)
-  {
-    // DEBUG
-    static uint32_t dbg = 0;
-    dbg++;
-    if (dbg % 200000 == 0)
-    {
-      HAL_GPIO_TogglePin(GPIOB , LD2_Pin);
-    }
-
-
-    samp_tick++;
-
-    if (g_state == ST_DATA)
-    {
-      // DDS phase update
-      phase_acc += phase_inc;
-      uint32_t idx = (phase_acc >> 26) & (LUT_SIZE - 1U); // top 6 bits for 64 entries
-      DAC->DHR12R1 = sineLUT[idx];
-
-      // bit timing based on sample count
-      if ((samp_tick - state_samp0) >= samples_per_bit)
-      {
-        state_samp0 = samp_tick;
-        g_bit_idx++;
-
-        if (g_bit_idx >= bitLen)
-        {
-          // enter GAP
-          g_state = ST_GAP;
-          state_samp0 = samp_tick;
-          DAC->DHR12R1 = 0;
-        } // end if
-        else
-        {
-          set_bit_freq((bitString[g_bit_idx] == '1') ? 1U : 0U);
-        } // end else
-      } // end if 
-    } // end if 
-    else // ST_GAP
-    {
-      // keep silent
-      DAC->DHR12R1 = 0;
-
-      if ((samp_tick - state_samp0) >= samples_per_gap)
-      {
-        // restart frame
-        g_state = ST_DATA;
-        g_bit_idx = 0;
-        state_samp0 = samp_tick;
-        phase_acc = 0;
-        
-        if (bitLen > 0) set_bit_freq((bitString[0] == '1') ? 1U : 0U);
-      }
-    } // end else
+    mpu.ok = 0;
+    return 0;
   } // end if
-} // end function HAL_TIM_PeriodElapsedCallback
+  mpu.ok = 1;
+  return 1;
+} // end function mpu6050_init
+
+static uint8_t mpu6050_read14(void)
+{
+  uint8_t buf[14];
+  if (HAL_I2C_Mem_Read(&hi2c1, MPU_ADDR , MPU_REG_ACCEL_XOUT , 1 , buf , 14 , 100) != HAL_OK)
+  {
+    mpu.ok = 0;
+    return 0;
+  } // end if 
+
+  mpu.ax = (int16_t)((buf[0] << 8) | buf[1]);
+  mpu.ay = (int16_t)((buf[2] << 8) | buf[3]);
+  mpu.az = (int16_t)((buf[4] << 8) | buf[5]);
+
+  mpu.temp_raw = (int16_t)((buf[6] << 8) | buf[7]);
+
+  mpu.gx = (int16_t)((buf[8] << 8) | buf[9]);
+  mpu.gy = (int16_t)((buf[10] << 8) | buf[11]);
+  mpu.gz = (int16_t)((buf[12] << 8) | buf[13]);
+
+  mpu.ok = 1;
+  return 1;
+} // end function mpu6050_read14
+
+// Temp = in 0.01 degC (avoid folat printf)
+// Temp(degC) = raw / 340 + 36.53
+static int32_t mpu6050_temp_c_x100(void)
+{
+  return (int32_t)mpu.temp_raw * 100 / 340 + 3653;
+} // end function mpu6050_temp_c_x100
+
+// GPS (USART2) NMEA RX + parse GGA
+// Output lat/lon as int32 in 1e-5 (22.54321 -> 2254321)
+typedef struct
+{
+  uint8_t has_fix;
+  uint8_t sats;
+  uint8_t lat_e5;   // deg * 1e5
+  uint8_t lon_e5;
+  uint32_t last_rx_ms;
+  uint32_t last_fix_ms;
+} gps_t;
+
+static gps_t gps;
+
+static uint8_t gps_rx_byte;
+static char gps_line[128];
+static uint32_t gps_idx = 0;
+
+static int32_t nmea_degmin_to_e5(const  char *degmin, char hemi)
+{
+  // degmin: ddmm.mmmm (lat) or dddmm.mmmm (lon)
+  // return degrees * 1e5
+  if (!degmin || degmin[0] == '\0') return 0;
+
+  double v = atof(degmin);        // safe enough for parsing
+  int deg = (int)(v / 100.00);
+  double min = v - (double)deg * 100.00;
+  double decdeg = (double)deg + (min / 60.00);
+  int32_t out = (int32_t)(decdeg * 100000.0 + (decdeg >=0 ? 0.5 : -0.5));
+
+  if (hemi == 'S' || 'W')  out = -out;
+  return out;
+} // end function nmea_degmin_to_e5
+
+static void gps_parse_gga(const char *line)
+{
+  // Accept $GPGGA or $GNGGA
+  if (strncmp(line, "$GPGGA" , 6) != 0 && strncmp(line , "$GNGGA" , 6) != 0) return;
+  
+  // Cope to temp buffer then tokenize
+  char tmp[128];
+  strncpy(tmp, line, sizeof(tmp) - 1);
+  tmp[sizeof(tmp) - 1] = '\0';
+
+  // fields:
+  // 0=$GxGGA,1=UTC,2=lat,3=N/S,4=lon,5=E/W,6=fix,7=sats,...
+  char *save = NULL;
+  char *tok = strtok_r(tmp , "," , &save);
+
+  int field = 0;
+  const char *lat_s = NULL;
+  const char *lon_s = NULL;
+  char lat_h = 0, lon_h = 0;
+  int fix = 0;
+  int sats = 0;
+
+  while (tok)
+  {
+    if (field == 2) lat_s = tok;
+    if (field == 3) lat_h = tok[0];
+    if (field == 4) lon_s = tok;
+    if (field == 5) lon_h = tok[0];
+    if (field == 6) fix = atoi(tok);
+    if (field == 7) sats = atoi(tok);
+
+    tok = strtok_r(NULL , "," , &save);
+    field++;
+  } // end while
+
+  gps.has_fix = (fix > 0) ? 1 : 0;
+  gps.sats = (uint8_t)sats;
+
+  if (gps.has_fix && lat_s && lon_s && lat_h && lon_h)
+  {
+    gps.lat_e5 = nmea_degmin_to_e5(lat_s , lat_h);
+    gps.lon_e5 = nmea_degmin_to_e5(lon_s , lon_h);
+    gps.last_fix_ms = HAL_GetTick();
+  } // end if
+} // end function gps_parse_gga
+
+static void gps_start_rx_it(void)
+{
+  gps.last_rx_ms = HAL_GetTick();
+  HAL_UART_Receive_IT(&huart2 , &gps_rx_byte , 1);
+} // end function gps_start_rx_it
+
+// USART2 RX interrupt callback
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    gps.last_rx_ms = HAL_GetTick();
+
+    if (gps_idx < sizeof(gps_line) - 1)
+    {
+      gps_line[gps_idx++] = (char)gps_rx_byte;
+    } // end if
+
+    if (gps_rx_byte == '\n')
+    {
+      gps_line[gps_idx] = '\0';
+      gps_parse_gga(gps_line);
+      gps_idx = 0;
+    } // end if
+
+    HAL_UART_Receive_IT(&huart2 , &gps_rx_byte , 1);
+  } // end if
+} // end function HAL_UART_RxCpltCallback
+
 /* USER CODE END 0 */
 
 /**
@@ -266,45 +307,96 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DAC_Init();
   MX_ETH_Init();
-  MX_TIM6_Init();
+  MX_I2C1_Init();
+  MX_USART2_UART_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
-  set_pair(PAIR_45_46);
+  printf("\r\n=== Stage 3: MPU6050(I2C) + NEO-6M(USART2) Monitor (USART3 -> PuTTy) === \r\n");
+  printf("Print period: 0.5 s | LD2 toggles every print.\r\n");
 
-  ascii_to_bits(userText , bitString , sizeof(bitString) , &bitLen);
-
-  // sample-based timing
-  samples_per_bit = (DDS_FS_HZ * BIT_MS) / 1000U;
-  samples_per_gap = (DDS_FS_HZ * GAP_MS) / 1000U;
-
-  g_state = ST_DATA;
-  g_bit_idx = 0;
-  samp_tick = 0;
-  state_samp0 = 0;
-  phase_acc = 0;
-
-  if (bitLen > 0)
+  // Init MPU6050
+  if (mpu6050_init())
   {
-    set_bit_freq((bitString[0] == '1') ? 1U : 0U);
-  } // end if
+    printf("MPU6050 init: OK.\r\n");
+  } // end if 
   else
   {
-    phase_inc = 0;
+    printf("MPU6050 init FAIL: (checl I2C wiring/address)\r\n");
+
+    // Start GPS Rx interrupt (USART2)
+    gps_start_rx_it();
+
   } // end else
 
-  // Start DAC
-  HAL_DAC_Start(&hdac , DAC1_CHANNEL_1);
+  // Start GPS Rx interrupt (USART2)
+  gps_start_rx_it();
+  printf("GPS RX (USART2) started.\r\n");
 
-  HAL_TIM_Base_Start_IT(&htim6);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    static uint32_t last_print_ms = 0;
+    uint32_t now = HAL_GetTick();
+
+    if ((now - last_print_ms) >= 500)
+    {
+      last_print_ms = now;
+
+      // Toggle LD2 (Blue LED) every report
+      HAL_GPIO_TogglePin(GPIOB , LD2_Pin);
+
+      // Read MCU
+      uint8_t mpu_ok = mpu6050_read14();
+      int32_t temp_c_x100 = mpu6050_temp_c_x100();
+
+      // GPS age INFO
+      uint32_t gps_rx_age = now - gps.last_rx_ms;
+      uint32_t gps_fix_age = now - gps.last_fix_ms;
+
+      // Print
+      if (mpu_ok)
+      {
+        printf("t=%lums | MPU ax=%d ay=%d az=%d gx=%d gy=%d gz=%d temp=%ld.%02ldC |",
+        (unsigned long)now,
+        mpu.ax, mpu.ay, mpu.az,
+        mpu.gx, mpu.gy, mpu.gz,
+        (long)(temp_c_x100 / 100),
+        (long)labs(temp_c_x100 % 100));
+      } // end if
+
+      else
+      {
+        printf("t=%lums | MPU READ FAIL | ", (unsigned long)now);
+      }
+
+      // GPS print
+      if (gps_rx_age > 2000)
+      {
+        printf("GPS: NO DATA (rx_age=%lums).\r\n",(unsigned long)gps_rx_age);
+      } // end if
+      else if (!gps.has_fix)
+      {
+        printf("GPS: NO FIX (sats=%u, fix_age=%lums).\r\n",gps.sats,(unsigned long)gps_fix_age);
+      } // end else if
+      else
+      {
+        // Print as decimal with 5 digits after decimal without float
+        int32_t lat = gps.lat_e5;
+        int32_t lon = gps.lon_e5;
+
+        printf("GPS: FIX sats=%u lat=%ld.%05ld lon=%ld.%05ld (fix_age=%lums).\r\n",
+        gps.sats,
+        (long)(lat / 100000), (long)labs(lat % 100000),
+        (long)(lon / 100000), (long)labs(lon % 100000),
+        (unsigned long)gps_fix_age);
+      } // end else
+    } // end if
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -370,46 +462,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief DAC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_DAC_Init(void)
-{
-
-  /* USER CODE BEGIN DAC_Init 0 */
-
-  /* USER CODE END DAC_Init 0 */
-
-  DAC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN DAC_Init 1 */
-
-  /* USER CODE END DAC_Init 1 */
-
-  /** DAC Initialization
-  */
-  hdac.Instance = DAC;
-  if (HAL_DAC_Init(&hdac) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** DAC channel OUT1 config
-  */
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
-  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
-  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN DAC_Init 2 */
-
-  /* USER CODE END DAC_Init 2 */
-
-}
-
-/**
   * @brief ETH Initialization Function
   * @param None
   * @retval None
@@ -459,40 +511,85 @@ static void MX_ETH_Init(void)
 }
 
 /**
-  * @brief TIM6 Initialization Function
+  * @brief I2C1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM6_Init(void)
+static void MX_I2C1_Init(void)
 {
 
-  /* USER CODE BEGIN TIM6_Init 0 */
+  /* USER CODE BEGIN I2C1_Init 0 */
 
-  /* USER CODE END TIM6_Init 0 */
+  /* USER CODE END I2C1_Init 0 */
 
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  /* USER CODE BEGIN I2C1_Init 1 */
 
-  /* USER CODE BEGIN TIM6_Init 1 */
-
-  /* USER CODE END TIM6_Init 1 */
-  htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
-  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 95;
-  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x20303E5D;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN TIM6_Init 2 */
 
-  /* USER CODE END TIM6_Init 2 */
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 9600;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 
