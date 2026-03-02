@@ -200,6 +200,7 @@ static int32_t nmea_degmin_to_e5(const  char *degmin, char hemi)
 
 static void gps_parse_gga(const char *line)
 {
+  printf("Raw: %s" , line);
   // Accept $GPGGA or $GNGGA
   if (strncmp(line, "$GPGGA" , 6) != 0 && strncmp(line , "$GNGGA" , 6) != 0) return;
   
@@ -379,8 +380,8 @@ int main(void)
       {
         printf("t=%lums | MPU ax=%d ay=%d az=%d gx=%d gy=%d gz=%d temp=%ld.%02ldC |",
         (unsigned long)now,
-        mpu.ax, mpu.ay, mpu.az,
-        mpu.gx, mpu.gy, mpu.gz,
+        mpu.ax, -mpu.ay, -mpu.az,
+        mpu.gx, -mpu.gy, -mpu.gz,
         (long)(temp_c_x100 / 100),
         (long)labs(temp_c_x100 % 100));
       } // end if
