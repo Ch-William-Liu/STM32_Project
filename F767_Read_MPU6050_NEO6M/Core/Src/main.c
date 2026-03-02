@@ -341,6 +341,11 @@ int main(void)
 
   } // end else
 
+  // check who am i
+  uint8_t who = 0xFF;
+  HAL_I2C_Mem_Read(&hi2c1, MPU_ADDR , 0x75 , 1 , &who , 1 , 100);
+  printf("MPU WHO_AM_I = 0x%02X\r\n" , who);
+
   // Start GPS Rx interrupt (USART2)
   gps_start_rx_it();
   printf("GPS RX (USART2) started.\r\n");
