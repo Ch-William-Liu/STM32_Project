@@ -107,7 +107,7 @@ int _write(int file, char *ptr, int len)
 #define MPU_ADDR_7_BIT    0x68
 #define MPU_ADDR          (MPU_ADDR_7_BIT << 1)
 
-#define MPU_REG_PWR_MGMT1   0x68
+#define MPU_REG_PWR_MGMT1   0x6B
 #define MPU_REG_ACCEL_XOUT  0x3B
 
 typedef struct
