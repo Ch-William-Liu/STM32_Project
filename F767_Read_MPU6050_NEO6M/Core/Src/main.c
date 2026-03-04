@@ -186,16 +186,18 @@ static int32_t nmea_degmin_to_e5(const  char *degmin, char hemi)
 {
   // degmin: ddmm.mmmm (lat) or dddmm.mmmm (lon)
   // return degrees * 1e5
-  if (!degmin || degmin[0] == '\0') return 0;
+  if (degmin == NULL || degmin[0] == '\0') return 0;
 
-  double v = atof(degmin);        // safe enough for parsing
-  int deg = (int)(v / 100.00);
-  double min = v - (double)deg * 100.00;
-  double decdeg = (double)deg + (min / 60.00);
-  int32_t out = (int32_t)(decdeg * 100000.0 + (decdeg >=0 ? 0.5 : -0.5));
+  double raw = atof(degmin);
+  int deg = (int)(raw / 100.0);
+  double minute = raw - (double)deg * 100;
+  double dec = (double)deg + minute / 60;
 
-  if (hemi == 'S' || 'W')  out = -out;
-  return out;
+  if (hemi == 'S' || hemi == 'W') dec = -dec;
+
+  double e5 = dec * 100000.00;
+  if (e5 >= 0) return (int32_t)(e5 + 0.5);
+  else          return (int32_t)(e5 - 0.5);
 } // end function nmea_degmin_to_e5
 
 static void gps_parse_gga(const char *line)
