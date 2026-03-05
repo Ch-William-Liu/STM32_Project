@@ -170,8 +170,8 @@ typedef struct
 {
   uint8_t has_fix;
   uint8_t sats;
-  uint8_t lat_e5;   // deg * 1e5
-  uint8_t lon_e5;
+  int32_t lat_e5;   // deg * 1e5
+  int32_t lon_e5;
   uint32_t last_rx_ms;
   uint32_t last_fix_ms;
 } gps_t;
@@ -202,7 +202,7 @@ static int32_t nmea_degmin_to_e5(const  char *degmin, char hemi)
 
 static void gps_parse_gga(const char *line)
 {
-  printf("Raw: %s" , line);
+  // printf("Raw: %s" , line);
   // Accept $GPGGA or $GNGGA
   if (strncmp(line, "$GPGGA" , 6) != 0 && strncmp(line , "$GNGGA" , 6) != 0) return;
   
@@ -283,7 +283,7 @@ static void i2c_scan_print(void)
   {
     if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(addr << 1) , 2 , 20) == HAL_OK)
     {
-      printf("  Found device at 0x%02X.\r\n");
+      printf("  Found device at 0x%02X.\r\n" , addr);
     } // end if
   } // end for
 } // end function i2c_scan_print
@@ -338,10 +338,6 @@ int main(void)
   else
   {
     printf("MPU6050 init FAIL: (check I2C wiring/address)\r\n");
-
-    // Start GPS Rx interrupt (USART2)
-    gps_start_rx_it();
-
   } // end else
 
   // check who am i
