@@ -220,7 +220,7 @@ void StopChirp(void)
 {
   HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
   HAL_TIM_Base_Stop(&htim6);
-  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , dacMid);
+  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
 
   chirpRunning = false;
   chirpStopRequested = false;
@@ -330,6 +330,8 @@ int main(void)
   printf("System ready.\r\n");
   printf("Use: chirp <f_low> <f_high> <duration_ms>\r\n");
   printf("Example: chirp 36000 42000 300\r\n");
+
+  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
   /* USER CODE END 2 */
 
   /* Infinite loop */
