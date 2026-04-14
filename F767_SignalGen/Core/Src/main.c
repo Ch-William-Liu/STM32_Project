@@ -107,6 +107,9 @@ volatile float chirpAmp = 1800.0f;          // keep below full scale
 volatile bool chirpFinishedFlag = false;
 volatile uint32_t halfCallbackCount = 0;
 volatile uint32_t fullCallbackCount = 0;
+
+volatile uint32_t chirpStartTick = 0;
+volatile uint32_t chirpEndTick = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -199,12 +202,18 @@ void StartChirp(float flow , float fhigh , float durationMs)
   currentSampleIndex = 0;
   chirpStopRequested = false;
   chirpRunning = true;
+  halfCallbackCount = 0;
+  fullCallbackCount = 0;
+  chirpEndTick = 0;
+  chirpFinishedFlag = false;
 
   FillBufferRange(dacBuf , 0 , HALF_BUF_LEN);
   FillBufferRange(&dacBuf[HALF_BUF_LEN] , HALF_BUF_LEN , HALF_BUF_LEN);
 
   st_tim = HAL_TIM_Base_Start(&htim6);
   st_dac = HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t *)dacBuf , BUF_LEN , DAC_ALIGN_12B_R);
+
+  chirpStartTick = HAL_GetTick();
 
   printf("Start chirp: %lu -> %lu Hz, %lu ms, samples = %lu\r\n",
          (uint32_t)flow,
@@ -220,7 +229,7 @@ void StopChirp(void)
 {
   HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
   HAL_TIM_Base_Stop(&htim6);
-  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , dacMid);
 
   chirpRunning = false;
   chirpStopRequested = false;
@@ -327,11 +336,12 @@ int main(void)
 
   UART_BeginReceive_IT();
 
+
   printf("System ready.\r\n");
   printf("Use: chirp <f_low> <f_high> <duration_ms>\r\n");
   printf("Example: chirp 36000 42000 300\r\n");
 
-  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , 0);
+  HAL_DAC_SetValue(&hdac , DAC_CHANNEL_1 , DAC_ALIGN_12B_R , dacMid);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -344,7 +354,7 @@ int main(void)
     if (chirpFinishedFlag)
     {
       chirpFinishedFlag = false;
-      printf("Chirp finished.\r\n");
+      printf("Chirp finished. elasped = %lu ms.\r\n" , chirpEndTick - chirpStartTick);
     }
 
     if (chirpRunning && (HAL_GetTick() - lastPrintTick >= 200))
@@ -532,7 +542,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 489;
+  htim6.Init.Period = 488;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -740,6 +750,7 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 
     if (chirpStopRequested)
     {
+      chirpEndTick = HAL_GetTick();
       StopChirp();
       chirpFinishedFlag = true;
     }
