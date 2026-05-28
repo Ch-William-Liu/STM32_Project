@@ -52,55 +52,64 @@ class SerialReader(QtCore.QThread):
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
             self.running = True
             self.status_msg.emit(f"Connected: {self.port} @ {self.baudrate}")
-
             while self.running:
-                data = self.ser.read(4096)
+                data = self.ser.read(4096) 
                 if not data:
                     continue
 
                 buf.extend(data)
 
                 while True:
-                    if len(buf) < 6:
+                    sync_pos = buf.find(bytes[SYNC1 , SYNC2])
+
+                    if sync_pos < 0:
+                        if len(buf) > 8192:
+                            buf.clear()
+                        self.status_msg.emit(f"RX {len(data)} bytes, sync_pos = -1")
                         break
 
-                    if buf[0] != SYNC1 or buf[1] != SYNC2:
-                        buf.pop(0)
+                    if sync_pos > 0:
+                        del buf[:sync_pos]
+
+                    if len(buf) < 18:
+                        break
+
+                    frame_index = int.from_bytes(buf[2:6],"little")
+                    fs = int.from_bytes(buf[6:10],"little")
+                    fft_size = int.from_bytes(buf[10:14],"little")
+                    bin_count = int.from_bytes(buf[14:18],"little")
+
+                    if fs not in [16000, 32000, 64000, 100000]:
+                        del buf[0]
                         continue
 
-                    # Current STM32 packet format:
-                    # [AA 55][msg_id u16][fft_len u16][payload uint16 * fftlen][crc u16]
-                    msg_id = int.from_bytes(buf[2:4], "little")
-                    fft_len = int.from_bytes(buf[4:6], "little")
-
-                    if fft_len <= 0 or fft_len > 4096:
-                        buf.pop(0)
+                    if fft_size not in [1024, 2048, 4096]:
+                        del buf[0]
                         continue
 
-                    packet_len = 2 + 2 + 2 + fft_len * 2 + 2
+                    if bin_count <= 0 or bin_count > 4096:
+                        del buf[0]
+                        continue
+
+                    packet_len = 18 + bin_count * 2 + 2
 
                     if len(buf) < packet_len:
                         break
 
-                    payload = bytes(buf[6:6 + fft_len * 2])
-                    crc_bytes = bytes(buf[6 + fft_len * 2 : 6 + fft_len * 2 + 2])
+                    if buf[packet_len - 2] != 0x55 or buf[packet_len - 1] != 0xAA:
+                        del buf[0]
+                        continue
 
-                    values = np.frombuffer(payload, dtype=np.uint16).copy()
+                    payload = bytes(buf[18 : 18 + bin_count * 2])
+                    values = np.frombuffer(payload , dtype="<u2").copy()
 
-                    recv_crc = int.from_bytes(crc_bytes, "little")
-                    calc_crc = int(np.sum(values) & 0xFFFF)
-                    crc_ok = recv_crc == calc_crc
-
-                    raw_hex = " ".join(f"{b:02X}" for b in buf[:min(packet_len, 64)])
+                    raw_hex = " ".join(f"{b:02X}" for b in buf[:min(packet_len , 64)])
                     if packet_len > 64:
-                        raw_hex += "..."
+                        raw_hex += " ..."
 
                     del buf[:packet_len]
 
-                    fs = MainConfig.current_fs
-                    fft_size = fft_len * 2
-
-                    freq_axis = np.arange(fft_len) * fs / fft_size
+                    freq_axis = np.arange(bin_count) * fs / fft_size
                     mag_db = 20.0 * np.log10(values.astype(float) + 1e-12)
 
                     peak_bin = int(np.argmax(mag_db))
@@ -108,15 +117,16 @@ class SerialReader(QtCore.QThread):
                     peak_mag = float(mag_db[peak_bin])
 
                     self.packet_received.emit(
-                        msg_id,
+                        frame_index,
                         values,
                         raw_hex,
-                        crc_ok,
+                        True,
                         peak_freq,
                         peak_mag,
                         fs,
                         fft_size
                     )
+
 
         except Exception as e:
             self.status_msg.emit(f"Serial error: {e}")

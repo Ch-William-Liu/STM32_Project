@@ -174,6 +174,7 @@ void UART_SendFFTFrame(
         0x55 0xAA
     */
 
+
     uint8_t header[18];
     uint8_t tail[2] = {0x55, 0xAA};
 

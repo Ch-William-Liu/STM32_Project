@@ -104,16 +104,16 @@ int main(void)
   MX_USART3_UART_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Transmit(&huart3, (uint8_t*)"MAIN START\r\n", 12, 1000);
-  // APP_Init();
+  // HAL_UART_Transmit(&huart3, (uint8_t*)"MAIN START\r\n", 12, 1000);
+  APP_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_UART_Transmit(&huart3, (uint8_t*)"HELLO\r\n", 7, 1000);
-    // APP_Loop();
+    // HAL_UART_Transmit(&huart3, (uint8_t*)"HELLO\r\n", 7, 1000);
+    APP_Loop();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -176,7 +176,21 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
+{
+  if (hadc->Instance == ADC1)
+  {
+    APP_ADC_HalfCallback();
+  } // end if
+} // end function HAL_ADC_ConvHalfCpltCallback
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+  if (hadc->Instance == ADC1)
+  {
+    APP_ADC_FullCallback();
+  } // end if
+} // end function HAL_ADC_ConvCpltCallback
 /* USER CODE END 4 */
 
  /* MPU Configuration */
