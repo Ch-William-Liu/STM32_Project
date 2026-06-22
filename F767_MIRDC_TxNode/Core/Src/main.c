@@ -189,7 +189,6 @@ int main(void)
   printf("System ready.\r\n");
 
   uint8_t last_minute = 255;
-  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -199,7 +198,69 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+    DS3231_Time_t now;
+    if (DS3231_GetTime(&hi2c2 , &now) == HAL_OK)
+    {
+      if (now.minute != last_minute)
+      {
+        last_minute = now.minute;
+
+        LED_GreenOnly();
+
+        IMU_Raw_t imu;
+
+        if (MPU6050_ReadRaw(&hi2c1 , &imu) == HAL_OK)
+        {
+          uint32_t timestamp = DS3231_ToSimpleTimestamp(&now);
+
+          SD_LogRaw(timestamp , imu);
+
+          AvgBuffer_Add(imu);
+
+          printf("RAW saved. Time=%lu, Count=%d, ACC=%d,%d,%d, GYRO=%d,%d,%d\r\n",
+            timestamp , AvgBufferr_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
+
+          if ((now.minute % 10 == 0) && (AvgBuffer_GetCount() > 0))
+          {
+            LED_BlueOnly();
+
+            printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
+
+            IMU_Avg_t avg = AvgBuffer_GetAverage();
+            AvgBuffer_Clear();
+
+            uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
+            uint32_t dac_len = DBPSK_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
+
+            printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_buffer , dac_len);
+
+            DAC_Play(dac_buffer , dac_len);
+
+            seq_id++;
+
+            freq_pair++;
+
+            if (freq_pair > 4)
+            {
+              freq_pair = 1;
+            } // end if freq_pair > 4
+
+            LED_GreenOnly();
+          } // end scheduled mission
+        } // end if able to read MPU6050
+        else
+        {
+          printf("MPU6050 read failed.\r\n");
+        } // end else
+      } // end if reach trigger time
+    } // end if DS3231 able to get time
+    else
+    {
+      printf("DS3231 read failed.\r\n");
+    } // end else
+
+    HAL_Delay(100);
+  } // end while
   /* USER CODE END 3 */
 }
 
