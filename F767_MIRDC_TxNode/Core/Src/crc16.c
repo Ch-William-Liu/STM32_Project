@@ -16,7 +16,7 @@ uint16_t CRC16_CCITT(uint8_t *data , uint16_t len)
             } // end crc
             else
             {
-                crc << 1;
+                crc <<= 1;
             } // end else
         } // end for
     } // end for

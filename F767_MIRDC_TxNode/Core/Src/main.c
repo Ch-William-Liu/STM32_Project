@@ -218,7 +218,7 @@ int main(void)
           AvgBuffer_Add(imu);
 
           printf("RAW saved. Time=%lu, Count=%d, ACC=%d,%d,%d, GYRO=%d,%d,%d\r\n",
-            timestamp , AvgBufferr_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
+            timestamp , AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           if ((now.minute % 10 == 0) && (AvgBuffer_GetCount() > 0))
           {
@@ -232,7 +232,7 @@ int main(void)
             uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
             uint32_t dac_len = DBPSK_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
 
-            printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_buffer , dac_len);
+            printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
 
             DAC_Play(dac_buffer , dac_len);
 
