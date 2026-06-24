@@ -1,6 +1,6 @@
 #include "avg_buffer.h"
 
-#define AVG_COUNT 10
+#define AVG_COUNT 70
 
 static IMU_Raw_t imu_buffer[AVG_COUNT];
 static uint8_t imu_count = 0;

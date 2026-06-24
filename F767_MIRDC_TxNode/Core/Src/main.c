@@ -220,7 +220,7 @@ int main(void)
           printf("RAW saved. Time=%lu, Count=%d, ACC=%d,%d,%d, GYRO=%d,%d,%d\r\n",
             timestamp , AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
-          if ((now.minute % 10 == 0) && (AvgBuffer_GetCount() > 0))
+          if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
           {
             LED_BlueOnly();
 
