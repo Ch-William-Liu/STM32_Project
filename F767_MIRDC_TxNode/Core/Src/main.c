@@ -23,8 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stdio.h"
-#include "string.h"
+#include <stdio.h>
+#include <string.h>
 
 #include "imu_types.h"
 #include "led_ctrl.h"
@@ -161,6 +161,7 @@ int main(void)
   MX_FATFS_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
+  HAL_Delay(1000);
   LED_AllOff();
   Relay_Off();
 
@@ -169,6 +170,8 @@ int main(void)
   if (MPU6050_Init(&hi2c1) != HAL_OK)
   {
     printf("MPU6050 init failed.\r\n");
+    LED_RedOnly();
+    HAL_Delay(1000);
   } // end if mpu6050 not ok
   else
   {
@@ -178,6 +181,8 @@ int main(void)
   if (SD_Logger_Init() != FR_OK)
   {
     printf("SD init failed.\r\n");
+    LED_BlueOnly();
+    HAL_Delay(1000);
   } // end if SD card not ok
   else
   {
@@ -189,6 +194,7 @@ int main(void)
   printf("System ready.\r\n");
 
   uint8_t last_minute = 255;
+  uint8_t last_second = 255;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -201,11 +207,16 @@ int main(void)
     DS3231_Time_t now;
     if (DS3231_GetTime(&hi2c2 , &now) == HAL_OK)
     {
-      if (now.minute != last_minute)
+      // switch period 
+      // if (now.minute != last_minute)
+      if (now.second != last_second)
       {
-        last_minute = now.minute;
+        
+        last_second = now.second;
 
         LED_GreenOnly();
+        // LED_BlueOnly();
+        // LED_RedOnly();
 
         IMU_Raw_t imu;
 
@@ -213,15 +224,17 @@ int main(void)
         {
           uint32_t timestamp = DS3231_ToSimpleTimestamp(&now);
 
-          SD_LogRaw(timestamp , imu);
+          // SD_LogRaw(timestamp , imu);
 
           AvgBuffer_Add(imu);
 
           printf("RAW saved. Time=%lu, Count=%d, ACC=%d,%d,%d, GYRO=%d,%d,%d\r\n",
             timestamp , AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
-          if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
+          // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
+          if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0))
           {
+            last_minute = now.minute;
             LED_BlueOnly();
 
             printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
@@ -235,7 +248,7 @@ int main(void)
             printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
 
             DAC_Play(dac_buffer , dac_len);
-
+            
             seq_id++;
 
             freq_pair++;

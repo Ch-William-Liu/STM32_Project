@@ -17,10 +17,10 @@ HAL_StatusTypeDef DS3231_GetTime(I2C_HandleTypeDef *hi2c , DS3231_Time_t *rtc)
         return HAL_ERROR;
     } // end if I2C_Master_Transmit not ok
 
-    if (HAL_I2C_Master_Transmit(hi2c , DS3231_ADDR , buf , 7 , 100) != HAL_OK)
+    if (HAL_I2C_Master_Receive(hi2c , DS3231_ADDR , buf , 7 , 100) != HAL_OK)
     {
         return HAL_OK;
-    } // end if I2C_Master_Transmit size not ok
+    } // end if I2C_Master_Receive size not ok
 
     rtc->second    = bcd_to_dec(buf[0] & 0x7F);
     rtc->minute    = bcd_to_dec(buf[1] & 0x7F);
@@ -35,6 +35,6 @@ HAL_StatusTypeDef DS3231_GetTime(I2C_HandleTypeDef *hi2c , DS3231_Time_t *rtc)
 
 uint32_t DS3231_ToSimpleTimestamp(DS3231_Time_t *rtc)
 {
-    return 2000000000UL + ((uint32_t)rtc->year * 100000000UL) + ((uint32_t)rtc->month * 1000000UL) + ((uint32_t)rtc->date * 10000UL) + ((uint32_t)rtc->hour * 100UL) + + ((uint32_t)rtc->minute);
+    return 2000000000UL + ((uint32_t)rtc->year * 100000000UL) + ((uint32_t)rtc->month * 1000000UL) + ((uint32_t)rtc->date * 10000UL) + ((uint32_t)rtc->hour * 100UL) + ((uint32_t)rtc->minute);
 } // end function DS3231_ToSimpleTimeStamp
 
