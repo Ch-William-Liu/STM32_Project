@@ -35,7 +35,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include <string.h>
 #include "ff_gen_drv.h"
-
+#include "fatfs_sd.h"
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 
@@ -81,8 +81,16 @@ DSTATUS USER_initialize (
 )
 {
   /* USER CODE BEGIN INIT */
+  if (SD_SPI_Init() == 0)
+  {
+    Stat &= ~STA_NOINIT;
+  } // end if
+  else
+  {
     Stat = STA_NOINIT;
-    return Stat;
+  } // end else
+
+  return Stat;
   /* USER CODE END INIT */
 }
 
@@ -96,7 +104,6 @@ DSTATUS USER_status (
 )
 {
   /* USER CODE BEGIN STATUS */
-    Stat = STA_NOINIT;
     return Stat;
   /* USER CODE END STATUS */
 }
@@ -117,6 +124,13 @@ DRESULT USER_read (
 )
 {
   /* USER CODE BEGIN READ */
+  for (UINT i = 0; i < count; i++)
+  {
+    if (SD_SPI_ReadBlocks(buff + i * 512 , sector + i , 1) != 0)
+    {
+      return RES_ERROR;
+    }
+  }
     return RES_OK;
   /* USER CODE END READ */
 }
@@ -139,6 +153,13 @@ DRESULT USER_write (
 {
   /* USER CODE BEGIN WRITE */
   /* USER CODE HERE */
+  for (UINT i = 0; i < count; i++)
+  {
+    if (SD_SPI_WriteBlocks(buff + i * 512, sector + i , 1) != 0)
+    {
+      return RES_ERROR;
+    }
+  }
     return RES_OK;
   /* USER CODE END WRITE */
 }
@@ -159,8 +180,26 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
-    DRESULT res = RES_ERROR;
-    return res;
+    switch (cmd)
+    {
+      case CTRL_SYNC:
+          return RES_OK;
+
+      case GET_SECTOR_SIZE:
+          *(WORD *)buff = 512;
+          return RES_OK;
+
+      case GET_BLOCK_SIZE:
+          *(DWORD *)buff = 1;
+          return RES_OK;
+
+      case GET_SECTOR_COUNT:
+          SD_SPI_GetSectorCount((uint32_t *)buff);
+          return RES_OK;
+
+      default:
+          return RES_PARERR;
+    }
   /* USER CODE END IOCTL */
 }
 #endif /* _USE_IOCTL == 1 */

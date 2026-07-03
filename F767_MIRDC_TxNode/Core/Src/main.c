@@ -170,8 +170,6 @@ int main(void)
   if (MPU6050_Init(&hi2c1) != HAL_OK)
   {
     printf("MPU6050 init failed.\r\n");
-    LED_RedOnly();
-    HAL_Delay(1000);
   } // end if mpu6050 not ok
   else
   {
@@ -192,9 +190,10 @@ int main(void)
   LED_GreenOnly();    // Standby state
 
   printf("System ready.\r\n");
+  DS3231_Time_t now;
 
-  uint8_t last_minute = 255;
-  uint8_t last_second = 255;
+  uint8_t last_minute = now.minute;
+  uint8_t last_second = now.second;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -204,14 +203,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    DS3231_Time_t now;
+    
     if (DS3231_GetTime(&hi2c2 , &now) == HAL_OK)
     {
       // switch period 
       // if (now.minute != last_minute)
       if (now.second != last_second)
       {
-        
         last_second = now.second;
 
         LED_GreenOnly();
@@ -224,7 +222,7 @@ int main(void)
         {
           uint32_t timestamp = DS3231_ToSimpleTimestamp(&now);
 
-          // SD_LogRaw(timestamp , imu);
+          SD_LogRaw(timestamp , imu);
 
           AvgBuffer_Add(imu);
 
@@ -298,7 +296,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLM = 8;
   RCC_OscInitStruct.PLL.PLLN = 432;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 2;
@@ -489,13 +487,13 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 7;
   hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
@@ -613,6 +611,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_RESET);

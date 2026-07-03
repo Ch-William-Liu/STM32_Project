@@ -12,6 +12,7 @@ FRESULT SD_Logger_Init(void)
     FRESULT res;
 
     res = f_mount(&fs , "" , 1);
+    printf("f_mount res = %d\r\n", res);
     if (res != FR_OK)
     {
         return res;
@@ -37,14 +38,26 @@ FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu)
 {
     char line[128];
 
-    snprintf(line , sizeof(line) , "%lu,%d,%d,%d,%d,%d,%d\r\n" , timestamp , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
+    snprintf(line , sizeof(line),
+             "%lu,%d,%d,%d,%d,%d,%d\r\n",
+             timestamp,
+             imu.acc_x, imu.acc_y, imu.acc_z,
+             imu.gyro_x, imu.gyro_y, imu.gyro_z);
 
     FRESULT res = f_write(&file , line , strlen(line) , &bw);
 
-    if (res == FR_OK)
+    printf("f_write res=%d, bw=%u, len=%u\r\n",
+           res, bw, (unsigned int)strlen(line));
+
+    if (res == FR_OK && bw == strlen(line))
     {
-        f_sync(&file);
-    } // end if ok
+        res = f_sync(&file);
+        printf("f_sync res=%d\r\n", res);
+    }
+    else
+    {
+        printf("RAW write failed\r\n");
+    }
 
     return res;
 } // end function SD_LogRaw
