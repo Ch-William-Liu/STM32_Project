@@ -73,7 +73,6 @@ static uint8_t packet_buffer[64];
 static uint16_t dac_buffer[DAC_BUFFER_SIZE];
 
 static uint16_t seq_id = 0;
-static uint8_t freq_pair = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -263,23 +262,19 @@ int main(void)
             IMU_Avg_t avg = AvgBuffer_GetAverage();
             AvgBuffer_Clear();
 
-            uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
-            uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
-
-            printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
-
-            printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
-
-            DAC_Play(dac_buffer , dac_len);
-            
-            seq_id++;
-
-            freq_pair++;
-
-            if (freq_pair > 4)
+            for (uint8_t pair = 1; pair <= 4; pair++)
             {
-              freq_pair = 1;
-            } // end if freq_pair > 4
+              uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
+              uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
+
+              printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
+
+              printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
+
+              DAC_Play(dac_buffer , dac_len);
+              
+            seq_id++;
+            } // switch pair for different freq
 
             LED_GreenOnly();
           } // end scheduled mission
