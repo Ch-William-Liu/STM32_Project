@@ -272,10 +272,15 @@ int main(void)
               printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", pair , seq_id , packet_len , dac_len);
 
               DAC_Play(dac_buffer , dac_len);
-              
-            seq_id++;
+
+              // Guard time
+              if (pair < 4)
+              {
+                HAL_Delay(100);
+              } // end if
             } // switch pair for different freq
 
+            seq_id++;
             LED_GreenOnly();
           } // end scheduled mission
         } // end if able to read MPU6050
