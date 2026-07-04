@@ -120,7 +120,7 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
     HAL_TIM_Base_Stop(&htim6);
     Relay_Off();
     LED_GreenOnly();
-    return();
+    return;
   } // end if
 
   while (HAL_DAC_GetState(&hdac) != HAL_DAC_STATE_READY)
