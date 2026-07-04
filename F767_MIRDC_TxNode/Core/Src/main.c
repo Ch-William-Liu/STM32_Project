@@ -264,12 +264,12 @@ int main(void)
 
             for (uint8_t pair = 1; pair <= 4; pair++)
             {
-              uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
-              uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
+              uint16_t packet_len = Packet_Build(packet_buffer , pair , seq_id , timestamp , avg);
+              uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , pair , dac_buffer , DAC_BUFFER_SIZE);
 
               printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
 
-              printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
+              printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", pair , seq_id , packet_len , dac_len);
 
               DAC_Play(dac_buffer , dac_len);
               
