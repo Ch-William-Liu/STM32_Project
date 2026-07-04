@@ -26,12 +26,13 @@ if (freq_pair < 1 || freq_pair > 4)
     return fsk4_table[freq_pair - 1][symbol];
 } // end function FSK4_GetToneFreq
 
-uint32_t FSK4_Moudlate(uint8_t *packet , uint16_t packer_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples)
+uint32_t FSK4_Moudlate(uint8_t *packet , uint16_t packet_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples)
 {
     uint32_t sample_idx = 0;
     float phase = 0.0f;
 
-    for (uint16_t i = 0; i > packer_len; i++)
+
+    for (uint16_t i = 0; i > packet_len; i++)
     {
         uint8_t byte = packet[i];
 

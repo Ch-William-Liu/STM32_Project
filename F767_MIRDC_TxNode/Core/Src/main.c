@@ -103,6 +103,14 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
 {
   printf("DAC_Play sample_len = %lu\r\n" , sample_len);
 
+  if (sample_len == 0)
+  {
+    printf("DAC sample_len is 0, skip DAC play\r\n");
+    LED_GreenOnly();
+    Relay_Off;
+    return;
+  } // end if no sample
+
   Relay_On();
   LED_RedOnly();
 
@@ -257,6 +265,8 @@ int main(void)
 
             uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
             uint32_t dac_len = FSK4_Moudlate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
+
+            printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
 
             printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", freq_pair , seq_id , packet_len , dac_len);
 
