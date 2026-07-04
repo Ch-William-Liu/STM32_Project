@@ -101,12 +101,27 @@ int _write(int file , char *ptr , int len)
 
 void DAC_Play(uint16_t *buffer , uint32_t sample_len)
 {
+  printf("DAC_Play sample_len = %lu\r\n" , sample_len);
+
   Relay_On();
   LED_RedOnly();
 
   HAL_TIM_Base_Start(&htim6);
 
-  HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t *)buffer , sample_len , DAC_ALIGN_12B_R);
+  HAL_StatusTypeDef ret;
+
+  ret = HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t *)buffer , sample_len , DAC_ALIGN_12B_R);
+
+  printf("HAL_DAC_Start_DMA ret = %d\r\n" , ret);
+
+  if (ret != HAL_OK)
+  {
+    printf("DAC DMA start failed\r\n");
+    HAL_TIM_Base_Stop(&htim6);
+    Relay_Off();
+    LED_GreenOnly();
+    return();
+  } // end if
 
   while (HAL_DAC_GetState(&hdac) != HAL_DAC_STATE_READY)
   {
