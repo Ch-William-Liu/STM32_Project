@@ -10,7 +10,7 @@
 #define SYMBOL_RATE         250.0f
 #define SYMBOL_DURATION_MS  4.0f
 
-#define SAMPLES_PER_BIT     768     // 192000 * 0.004
+#define SAMPLES_PER_SYMBOL  768     // 192000 * 0.004
 #define DAC_MID             2048
 #define DAC_AMP             1200
 
