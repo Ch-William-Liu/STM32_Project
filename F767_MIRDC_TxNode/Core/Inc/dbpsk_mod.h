@@ -15,6 +15,6 @@
 #define DAC_AMP             1200
 
 float FSK4_GetToneFreq(uint8_t freq_pair , uint8_t symbol);
-uint32_t FSK4_Moudlate(uint8_t *packet , uint16_t packer_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples);
+uint32_t FSK4_Modulate(uint8_t *packet , uint16_t packer_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples);
 
 #endif

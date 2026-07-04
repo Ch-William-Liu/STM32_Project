@@ -264,7 +264,7 @@ int main(void)
             AvgBuffer_Clear();
 
             uint16_t packet_len = Packet_Build(packet_buffer , freq_pair , seq_id , timestamp , avg);
-            uint32_t dac_len = FSK4_Moudlate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
+            uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , freq_pair , dac_buffer , DAC_BUFFER_SIZE);
 
             printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
 
