@@ -3,80 +3,23 @@
 
 #define PI 3.14159265359f
 
-float DBPSK_GetCarrierFreq(uint8_t freq_pair)
+static const float fsk4_table[4][4] = 
 {
-    switch (freq_pair)
-    {
-    case 1:
-        return 30250.0f;
-    case 2:
-        return 30750.0f;
-    case 3:
-        return 31250.0f;
-    case 4:
-        return 31750.0f;
-    default:
-        return 30250.0f;
-    } // end switch
-} // end function DBPSK_GetCarriterFreq
+    {28200.0f, 28600.0f, 29000.0f, 29400.0f},
+    {29700.0f, 30100.0f, 30500.0f, 30900.0f},
+    {31200.0f, 31600.0f, 32000.0f, 32400.0f},
+    {32700.0f, 33100.0f, 33500.0f, 33900.0f}
+};
 
-uint32_t DBPSK_Modulate(uint8_t *packet , uint16_t packet_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples)
+float FSK4_GetToneFreq(uint8_t freq_pair , uint8_t symbol)
 {
-    float fc = DBPSK_GetCarrierFreq(freq_pair);
-    float phase = 0.0f;
-    float phase_step = 2.0f * PI * fc / DAC_FS;
-
-    uint32_t sample_idx = 0;
-
-    for (uint16_t i = 0; i < packet_len; i++)
+if (freq_pair < 1 || freq_pair > 4)
     {
-        for (uint16_t b = 7; b >= 0; b--)
-        {
-            uint8_t bit = (packet[i] >> b) & 0x01;
 
-            if (bit == 1)
-            {
-                phase += PI;
+    } // end if unvalid freq_pair
+} // end function FSK4_GetToneFreq
 
-                if (phase >= 2.0f * PI)
-                {
-                    phase -= 2.0f * PI;
-                } // end if
-            } // end if
+uint32_t FSK4_Moudlate(uint8_t *packet , uint16_t packer_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples)
+{
 
-            for (uint16_t n = 0; n < SAMPLES_PER_BIT; n++)
-            {
-                if (sample_idx >= max_samples)
-                {
-                    return sample_idx;
-                }
-
-                float s = sinf(phase);
-
-                int32_t dac_val = DAC_MID + (int32_t)(DAC_AMP * s);
-
-                if (dac_val < 0)
-                {
-                    dac_val = 0;
-                } // end if val < 0
-
-                if (dac_val > 4095)
-                {
-                    dac_val = 4095;
-                } // end if val > 4095
-
-                dac_buffer[sample_idx] = (uint16_t)dac_val;
-                sample_idx++;
-
-                phase += phase_step;
-
-                if (phase >= 2.0f * PI)
-                {
-                    phase -= 2.0f * PI;
-                } // end if phase > 2Pi
-            } // end for
-        } // end for
-    } // end for
-    
-    return sample_idx;
-} // end function DBPSK_Modulate
+} // end function FSK4_Modulate
