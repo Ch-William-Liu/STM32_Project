@@ -106,11 +106,10 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
   {
     printf("DAC sample_len is 0, skip DAC play\r\n");
     LED_GreenOnly();
-    Relay_Off;
+    // Relay_Off;
     return;
   } // end if no sample
 
-  Relay_On();
   LED_RedOnly();
 
   HAL_TIM_Base_Start(&htim6);
@@ -125,7 +124,6 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
   {
     printf("DAC DMA start failed\r\n");
     HAL_TIM_Base_Stop(&htim6);
-    Relay_Off();
     LED_GreenOnly();
     return;
   } // end if
@@ -201,8 +199,6 @@ int main(void)
   if (SD_Logger_Init() != FR_OK)
   {
     printf("SD init failed.\r\n");
-    LED_BlueOnly();
-    HAL_Delay(1000);
   } // end if SD card not ok
   else
   {
@@ -235,8 +231,6 @@ int main(void)
         last_second = now.second;
 
         LED_GreenOnly();
-        // LED_BlueOnly();
-        // LED_RedOnly();
 
         IMU_Raw_t imu;
 
@@ -256,6 +250,8 @@ int main(void)
           {
             last_minute = now.minute;
             LED_BlueOnly();
+            Relay_On();
+            HAL_Delay(1000);
 
             printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
 
@@ -298,6 +294,7 @@ int main(void)
             } // switch pair for different freq
 
             seq_id++;
+            Relay_Off();
             LED_GreenOnly();
           } // end scheduled mission
         } // end if able to read MPU6050

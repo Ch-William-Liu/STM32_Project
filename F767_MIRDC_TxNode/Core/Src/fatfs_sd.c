@@ -33,6 +33,8 @@ static uint8_t sd_send_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
     spi_txrx(arg & 0xFF);
     spi_txrx(crc);
 
+    spi_txrx(0xFF);     // important dummy clock
+
     for (int i = 0; i < 10; i++)
     {
         res = spi_txrx(0xFF);
