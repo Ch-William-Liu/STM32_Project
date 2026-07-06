@@ -265,6 +265,23 @@ int main(void)
             for (uint8_t pair = 1; pair <= 4; pair++)
             {
               uint16_t packet_len = Packet_Build(packet_buffer , pair , seq_id , timestamp , avg);
+              SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer, packet_len);
+
+              printf("\r\n========================================\r\n");
+              printf("TX Packet\r\n");
+              printf("Timestamp : %lu\r\n", timestamp);
+              printf("SeqID     : %u\r\n", seq_id);
+              printf("Freq Pair : %u\r\n", pair);
+              printf("Length    : %u Bytes\r\n", packet_len);
+
+              printf("HEX : ");
+
+              for (uint16_t i = 0; i < packet_len; i++)
+              {
+                  printf("%02X ", packet_buffer[i]);
+              }
+
+              printf("\r\n========================================\r\n");
               uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , pair , dac_buffer , DAC_BUFFER_SIZE);
 
               printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);

@@ -61,3 +61,46 @@ FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu)
 
     return res;
 } // end function SD_LogRaw
+
+FRESULT SD_LogTxPacket(uint32_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len)
+{
+    FIL tx_file;
+    FRESULT res;
+    UINT bw;
+    char line[1024];
+    char hex_str[512];
+
+    hex_str[0] = '\0';
+
+    for (uint16_t i = 0; i < packet_len; i++)
+    {
+        char temp[4];
+        snprintf(temp, sizeof(temp), "%02X", packet[i]);
+        strncat(hex_str, temp, sizeof(hex_str) - strlen(hex_str) - 1);
+    } // end for
+
+    res = f_open(&tx_file, "TX_PACKET_LOG.csv", FA_OPEN_APPEND | FA_WRITE);
+    if (res != FR_OK)
+    {
+        return res;
+    } // end if write file not ok
+
+    if (f_size(&tx_file) == 0)
+    {
+        char header[] = "Timestamp,SeqID,FreqPair,PacketLen,PacketHex\r\n";
+        f_write(&tx_file, header, strlen(header), &bw);
+    } // end if empty file
+
+    snprintf(line, sizeof(line), "%lu,%u,%u,%u,%s" , timestamp, seq_id, freq_pair, packet_len, hex_str);
+
+    res = f_write(&tx_file, line, strlen(line), &bw);
+    
+    if (res == FR_OK)
+    {
+        res = f_sync(&tx_file);
+    } // end if write ok
+
+    f_close(&tx_file);
+
+    return res;
+} // end function SD_LogTxPacket
