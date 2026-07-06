@@ -51,7 +51,7 @@ uint8_t SD_SPI_Init(void)
     uint32_t timeout;
 
     SD_CS_HIGH();
-    HAL_Delay(10);
+    HAL_Delay(100);
 
     sd_spi_dummy_clocks();
 
@@ -59,16 +59,22 @@ uint8_t SD_SPI_Init(void)
     SD_CS_HIGH();
     spi_txrx(0xFF);
 
+    printf("SD CMD0 res = 0x%02X\r\n", res);
+
     if (res != 0x01)
     {
         return 1;
     }
 
     res = sd_send_cmd(8, 0x000001AA, 0x87);
+    printf("SD CMD8 res = 0x%02X\r\n", res);
+
     for (int i = 0; i < 4; i++)
     {
-        spi_txrx(0xFF);
+        uint8_t r7 = spi_txrx(0xFF);
+        printf("CMD8 R7[%d]=0x%02X\r\n", i, r7);
     }
+
     SD_CS_HIGH();
     spi_txrx(0xFF);
 
@@ -76,20 +82,29 @@ uint8_t SD_SPI_Init(void)
 
     do
     {
-        sd_send_cmd(55, 0, 0x01);
+        res = sd_send_cmd(55, 0, 0x01);
         SD_CS_HIGH();
         spi_txrx(0xFF);
+
+        printf("SD CMD55 res = 0x%02X\r\n", res);
 
         res = sd_send_cmd(41, 0x40000000, 0x01);
         SD_CS_HIGH();
         spi_txrx(0xFF);
 
-        if ((HAL_GetTick() - timeout) > 1000)
+        printf("SD ACMD41 res = 0x%02X\r\n", res);
+
+        if ((HAL_GetTick() - timeout) > 5000)
         {
+            printf("SD ACMD41 timeout\r\n");
             return 2;
         }
 
+        HAL_Delay(10);
+
     } while (res != 0x00);
+
+    printf("SD SPI init OK\r\n");
 
     return 0;
 }
