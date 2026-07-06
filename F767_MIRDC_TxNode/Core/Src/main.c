@@ -294,6 +294,7 @@ int main(void)
             } // switch pair for different freq
 
             seq_id++;
+            HAL_Delay(1000);
             Relay_Off();
             LED_GreenOnly();
           } // end scheduled mission
