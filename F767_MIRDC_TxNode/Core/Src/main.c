@@ -135,8 +135,6 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
   
   HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
   HAL_TIM_Base_Stop(&htim6);
-
-  Relay_Off();
 }
 /* USER CODE END 0 */
 
