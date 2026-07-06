@@ -24,7 +24,7 @@ HAL_StatusTypeDef MPU6050_ReadRaw(I2C_HandleTypeDef *hi2c , IMU_Raw_t *imu)
         return HAL_ERROR;
     } // end if I2C_Master_Transmit not OK
 
-    if (HAL_I2C_Master_Transmit(hi2c , MPU6050_ADDR , buf , 14 , 100) != HAL_OK)
+    if (HAL_I2C_Master_Receive(hi2c , MPU6050_ADDR , buf , 14 , 100) != HAL_OK)
     {
         return HAL_ERROR;
     } // end if I2C_Master_Transmit size not OK
