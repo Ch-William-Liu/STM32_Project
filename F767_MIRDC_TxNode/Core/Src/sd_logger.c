@@ -79,7 +79,8 @@ FRESULT SD_LogTxPacket(uint32_t timestamp, uint16_t seq_id, uint8_t freq_pair, u
         strncat(hex_str, temp, sizeof(hex_str) - strlen(hex_str) - 1);
     } // end for
 
-    res = f_open(&tx_file, "TX_PACKET_LOG.csv", FA_OPEN_APPEND | FA_WRITE);
+    res = f_open(&tx_file, "TX_LOG.csv", FA_OPEN_APPEND | FA_WRITE);
+    printf("TXLOG f_open res=%d\r\n" , res);
     if (res != FR_OK)
     {
         return res;
@@ -91,10 +92,11 @@ FRESULT SD_LogTxPacket(uint32_t timestamp, uint16_t seq_id, uint8_t freq_pair, u
         f_write(&tx_file, header, strlen(header), &bw);
     } // end if empty file
 
-    snprintf(line, sizeof(line), "%lu,%u,%u,%u,%s" , timestamp, seq_id, freq_pair, packet_len, hex_str);
+    snprintf(line, sizeof(line), "%lu,%u,%u,%u,%s\r\n" , timestamp, seq_id, freq_pair, packet_len, hex_str);
 
     res = f_write(&tx_file, line, strlen(line), &bw);
-    
+    printf("TXLOG f_write res=%d, bw=%u, len=%u\r\n", res, bw, (unsigned int)strlen(line));
+
     if (res == FR_OK)
     {
         res = f_sync(&tx_file);
