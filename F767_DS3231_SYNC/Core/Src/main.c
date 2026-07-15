@@ -1,5 +1,4 @@
 /* USER CODE BEGIN Header */
-/* F767_DS3231_SYNC */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -24,9 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ds3231.h"
-#include "uart_command.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -73,8 +73,9 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
-I2C_HandleTypeDef hi2c2;
-UART_HandleTypeDef huart3;
+#define UART_RX_BUFFER_SIZE       64U
+
+static char uartRxBuffer[UART_RX_BUFFER_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,6 +88,8 @@ static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
 static void UART_SendString(const char *text);
+static HAL_StatusTypeDef UART_ReceiveLine(char *buffer, uint16_t bufferSize);
+static void ProcessTimeString(const char timeString);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -102,7 +105,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  HAL_StatusTypeDef status;
+
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -131,50 +134,37 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
-  HAL_Delay(100U);
-
-  UART_SendString("\r\n"
-        "================================\r\n"
-        " STM32F767 DS3231 Time Sync\r\n"
-        "================================\r\n");
-
-  status = DS3231_IsReady(&hi2c2);
-
-  if (status == HAL_OK)
+  UART_SendString("\r\nDS3231 SYNC\r\n");
+  
+  if (DS3231_IsReady(&hi2c2) == HAL_OK)
   {
-    UART_SendString("DS3231: READY\r\n");
-  } // end if DS3231 exist
-  else  
-  {
-    UART_SendString("DS3231: NOT FOUND");
-  } // end else
-
-  status = UART_Command_Init(&huart3 , &hi2c2);
-
-  if (status == HAL_OK)
-  {
-    UART_SendString("UART command receiver: READY\r\n");
-  } // end if uart init ok
+    UART_SendString("DS3231 READY\r\n");
+  } // end if DS3231_IsReady
   else
   {
-    UART_SendString("UART command receiver: FAILED\r\n");
+    UART_SendString("DS3231 NOT FOUND\r\n");
   } // end else
 
-  UART_SendString(
-      "COMMANDS:\r\n"
-      "SETTIME,YYYY,MM,DD,HH,MM,SS\r\n"
-      "GETTIME\r\n"
-      "PING\r\n"
-      "HELP\r\n");
+  UART_SendString("Send time format:\r\nYYYY,MM,DD,HH,MM,SS\r\nExample:\r\n2026,07,15,11,00,40\r\n\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    UART_Command_Process();
+    UART_SendString("Waiting for time...\r\n");
 
-    HAL_Delay(1U);
+    memset(uartRxBuffer, 0 , sizeof(uartRxBuffer));
+
+    if (UART_ReceiveLine(uartRxBuffer, sizeof(uartRxBuffer)) == HAL_OK)
+    {
+      ProcessTimeString(uartRxBuffer);
+    } // end if receiveLine OK
+    else
+    {
+      UART_SendString("ERROR,UART_RECEIVE\r\n");
+    } // end else
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -472,18 +462,120 @@ static void UART_SendString(const char *text)
     return;
   } // end if text is NULL
 
-  HAL_UART_Transmit(&huart3 , (uint8_t *)text , (uint16_t)strlen(text) , 100U);
+  HAL_UART_Transmit(&huart3, (uint8_t *)text, (uint16_t)strlen(text), 1000U);
 } // end function UART_SendString
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+static HAL_StatusTypeDef UART_ReceiveLine(char *buffer, uint16_t bufferSize)
 {
-  UART_Command_RxCpltCallback(huart);
-} // end function HAL_UART_RxCpltCallback
+  uint8_t receiveByte;
+  uint16_t index = 0U;
+  HAL_StatusTypeDef status;
 
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+  if ((buffer == NULL) || (bufferSize < 2U))
+  {
+    return HAL_ERROR;
+  } // end if buffer is NULL or too small
+
+  while (1)
+  {
+    status = HAL_UART_Receive(&huart3, &receiveByte, 1U, HAL_MAX_DELAY);
+
+    if (status != HAL_OK)
+    {
+      return status;
+    } // end if receive not OK;
+
+    if ((receiveByte == '\r') || (receiveByte == '\n'))
+    {
+      if (index > 0U)
+      {
+        buffer[index] = '\0';
+        return HAL_OK;
+      } // end if index > 0
+
+      continue;
+    } // end if receive line end with CR/LF
+
+    if (index < (buffer - 1U))
+    {
+      buffer[index] = (char)receiveByte;
+      index++;
+    } // end if
+    else
+    {
+      buffer[bufferSize - 1U] = '\0';
+      return HAL_ERROR;
+    } // end else
+  } // end while
+} // end function UART_ReceiveLine
+
+static void ProcessTimeString(const char *timeString)
 {
-  UART_Command_ErrorCallback(huart);
-} // end function HAL_UART_ErrorCallback
+  int year, month, date, hour, minute, second;
+
+  int parsedCount;
+
+  DS3231_Datetime_t requestedTime;
+  DS3231_Datetime_t readBackTime;
+
+  char txBuffer[100];
+
+  if (timeString == NULL)
+  {
+    UART_SendString("ERROR,NULL_STRING\r\n");
+    return;
+  } // end if timeString is Null
+
+  parsedCount = sscanf(timeString, "%d,%d,%d,%d,%d,%d",year, month, date, hour, minute, second);
+
+  if (parsedCount != 6)
+  {
+    UART_SendString("ERROR,FORMAT\r\nUse YYYY,MM,DD,HH,MM,SS\r\n");
+    return;
+  } // end if parsed count is not 6
+
+  if (
+    (year < 2000) || (year > 2099) ||
+    (month < 1) || (month > 12) ||
+    (date < 1) || (date > 31) ||
+    (hour < 0) || (hour > 23) ||
+    (minute < 0) || (minute > 59) ||
+    (second < 0) || (second > 59))
+  {
+    UART_SendString("ERROR,INVALID_TIME\r\n");
+    return;
+  } // end if time is invalid
+
+  requestedTime.year = (uint16_t)year;
+  requestedTime.month = (uint8_t)month;
+  requestedTime.date = (uint8_t)date;
+  requestedTime.hour = (uint8_t)hour;
+  requestedTime.minute = (uint8_t)minute;
+  requestedTime.second = (uint8_t)second;
+
+  requestedTime.day = DS3231_CalculateDay(requestedTime.year, requestedTime.month, requestedTime.date);
+
+  if (DS3231_SetDateTime(&hi2c2, &requestedTime) != HAL_OK)
+  {
+    UART_SendString("ERROR,RTC_WRITE\r\n");
+    return;
+  } // end if set time not OK
+
+  HAL_Delay(20U);
+
+  // read time once write time
+  if (DS3231_GetDataTime(&hi2c2, &readBackTime) != HAL_OK)
+  {
+    UART_SendString("ERROR,RTC_READ\r\n");
+    return;
+  } // end if read time not OK
+
+  snprintf(txBuffer, sizeof(txBuffer), "SYNC OK,%04u-%02u-%02u %02u:%02u:%02u\r\n",
+          readBackTime.year, readBackTime.month, readBackTime.date,
+          readBackTime.hour, readBackTime.minute, readBackTime.second);
+
+  UART_SendString(txBuffer);
+} // end function ProcessTimeString
 /* USER CODE END 4 */
 
  /* MPU Configuration */
