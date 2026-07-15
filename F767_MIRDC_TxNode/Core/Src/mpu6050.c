@@ -29,13 +29,13 @@ HAL_StatusTypeDef MPU6050_ReadRaw(I2C_HandleTypeDef *hi2c , IMU_Raw_t *imu)
         return HAL_ERROR;
     } // end if I2C_Master_Transmit size not OK
 
-    imu->acc_x  = (int16_t)(buf[0] << 8 | buf[1]);
-    imu->acc_y  = (int16_t)(buf[2] << 8 | buf[3]);
-    imu->acc_z  = (int16_t)(buf[4] << 8 | buf[5]);
+    imu->acc_x  = (buf[0] << 8 | buf[1]) / 16384.0f;
+    imu->acc_y  = (buf[2] << 8 | buf[3]) / 16384.0f;
+    imu->acc_z  = (buf[4] << 8 | buf[5]) / 16384.0f;
 
-    imu->gyro_x = (int16_t)(buf[8] << 8 | buf[9]);
-    imu->gyro_y = (int16_t)(buf[10] << 8 | buf[11]);
-    imu->gyro_z = (int16_t)(buf[12] << 8 | buf[13]);
+    imu->gyro_x = (buf[8] << 8 | buf[9]) / 131.0f;
+    imu->gyro_y = (buf[10] << 8 | buf[11]) / 131.0f;
+    imu->gyro_z = (buf[12] << 8 | buf[13]) / 131.0f;
 
     return HAL_OK;
 } // end function MPU6050_ReadRaw

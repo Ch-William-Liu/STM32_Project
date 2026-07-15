@@ -234,13 +234,13 @@ int main(void)
 
         if (MPU6050_ReadRaw(&hi2c1 , &imu) == HAL_OK)
         {
-          uint32_t timestamp = DS3231_ToSimpleTimestamp(&now);
+          uint64_t timestamp = DS3231_ToSimpleTimestamp(&now);
 
           SD_LogRaw(timestamp , imu);
 
           AvgBuffer_Add(imu);
 
-          printf("RAW saved. Time=%lu, Count=%d, ACC=%d,%d,%d, GYRO=%d,%d,%d\r\n",
+          printf("RAW saved. Time=%llu, Count=%d, ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n",
             timestamp , AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
@@ -263,7 +263,7 @@ int main(void)
 
               printf("\r\n========================================\r\n");
               printf("TX Packet\r\n");
-              printf("Timestamp : %lu\r\n", timestamp);
+              printf("Timestamp : %llu\r\n", timestamp);
               printf("SeqID     : %u\r\n", seq_id);
               printf("Freq Pair : %u\r\n", pair);
               printf("Length    : %u Bytes\r\n", packet_len);

@@ -20,7 +20,7 @@ typedef struct
 HAL_StatusTypeDef DS3231_IsReady(I2C_HandleTypeDef *hi2c);
 
 HAL_StatusTypeDef DS3231_SetDateTime(I2C_HandleTypeDef *hi2c, const DS3231_Datetime_t *dateTime);
-HAL_StatusTypeDef DS3231_GetDataTime(I2C_HandleTypeDef *hi2c, const DS3231_Datetime_t *dateTime);
+HAL_StatusTypeDef DS3231_GetDataTime(I2C_HandleTypeDef *hi2c, DS3231_Datetime_t *dateTime);
 
 uint8_t DS3231_CalculateDay(uint16_t year, uint8_t month, uint8_t date);
 

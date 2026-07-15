@@ -73,7 +73,7 @@ HAL_StatusTypeDef DS3231_SetDateTime(I2C_HandleTypeDef *hi2c, const DS3231_Datet
   return HAL_I2C_Mem_Write(hi2c, DS3231_ADDRESS , 0x00U, I2C_MEMADD_SIZE_8BIT, data , 7U, DS3231_TIMEOUT_MS);
 } // end function DS3231_SetDateTime
 
-HAL_StatusTypeDef DS3231_GetDataTime(I2C_HandleTypeDef *hi2c, const DS3231_Datetime_t *dateTime)
+HAL_StatusTypeDef DS3231_GetDataTime(I2C_HandleTypeDef *hi2c, DS3231_Datetime_t *dateTime)
 {
   uint8_t data[7];
   HAL_StatusTypeDef status;

@@ -1,4 +1,5 @@
 /* USER CODE BEGIN Header */
+/* F767_DS3231_SYNC */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -89,7 +90,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
 static void UART_SendString(const char *text);
 static HAL_StatusTypeDef UART_ReceiveLine(char *buffer, uint16_t bufferSize);
-static void ProcessTimeString(const char timeString);
+static void ProcessTimeString(const char *timeString);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -496,7 +497,7 @@ static HAL_StatusTypeDef UART_ReceiveLine(char *buffer, uint16_t bufferSize)
       continue;
     } // end if receive line end with CR/LF
 
-    if (index < (buffer - 1U))
+    if (index < (bufferSize - 1U))
     {
       buffer[index] = (char)receiveByte;
       index++;
@@ -526,7 +527,7 @@ static void ProcessTimeString(const char *timeString)
     return;
   } // end if timeString is Null
 
-  parsedCount = sscanf(timeString, "%d,%d,%d,%d,%d,%d",year, month, date, hour, minute, second);
+  parsedCount = sscanf(timeString, "%d,%d,%d,%d,%d,%d",&year, &month, &date, &hour, &minute, &second);
 
   if (parsedCount != 6)
   {

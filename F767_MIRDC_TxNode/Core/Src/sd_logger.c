@@ -39,7 +39,7 @@ FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu)
     char line[128];
 
     snprintf(line , sizeof(line),
-             "%lu,%d,%d,%d,%d,%d,%d\r\n",
+             "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
              timestamp,
              imu.acc_x, imu.acc_y, imu.acc_z,
              imu.gyro_x, imu.gyro_y, imu.gyro_z);

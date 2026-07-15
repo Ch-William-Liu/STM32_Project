@@ -5,13 +5,13 @@
 
 typedef struct
 {
-    int16_t acc_x;
-    int16_t acc_y;
-    int16_t acc_z;
+    float acc_x;
+    float acc_y;
+    float acc_z;
 
-    int16_t gyro_x;
-    int16_t gyro_y;
-    int16_t gyro_z;
+    float gyro_x;
+    float gyro_y;
+    float gyro_z;
 
 } IMU_Raw_t;
 

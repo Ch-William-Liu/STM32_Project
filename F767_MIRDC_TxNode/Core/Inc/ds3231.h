@@ -16,6 +16,6 @@ typedef struct
 } DS3231_Time_t;
 
 HAL_StatusTypeDef DS3231_GetTime(I2C_HandleTypeDef *hi2c , DS3231_Time_t *rtc);
-uint32_t DS3231_ToSimpleTimestamp(DS3231_Time_t *rtc);
+uint64_t DS3231_ToSimpleTimestamp(DS3231_Time_t *rtc);
 
 #endif
