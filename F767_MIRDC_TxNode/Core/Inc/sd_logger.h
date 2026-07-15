@@ -7,7 +7,7 @@
 #include "fatfs.h"
 
 FRESULT SD_Logger_Init(void);
-FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu);
-FRESULT SD_LogTxPacket(uint32_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len);
+FRESULT SD_LogRaw(uint64_t timestamp , IMU_Raw_t imu);
+FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len);
 
 #endif

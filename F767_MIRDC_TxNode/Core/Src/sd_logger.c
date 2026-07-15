@@ -34,12 +34,12 @@ FRESULT SD_Logger_Init(void)
     return FR_OK;
 } // end function SD_Logger_Init
 
-FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu)
+FRESULT SD_LogRaw(uint64_t timestamp , IMU_Raw_t imu)
 {
     char line[128];
 
     snprintf(line , sizeof(line),
-             "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
+             "%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
              timestamp,
              imu.acc_x, imu.acc_y, imu.acc_z,
              imu.gyro_x, imu.gyro_y, imu.gyro_z);
@@ -62,7 +62,7 @@ FRESULT SD_LogRaw(uint32_t timestamp , IMU_Raw_t imu)
     return res;
 } // end function SD_LogRaw
 
-FRESULT SD_LogTxPacket(uint32_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len)
+FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len)
 {
     FIL tx_file;
     FRESULT res;
