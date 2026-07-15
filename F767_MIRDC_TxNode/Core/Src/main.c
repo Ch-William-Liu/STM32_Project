@@ -240,8 +240,16 @@ int main(void)
 
           AvgBuffer_Add(imu);
 
-          printf("RAW saved. Time=%llu, Count=%d, ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n",
-            timestamp , AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
+          // printf("Count=%u\r\n", (unsigned int)AvgBuffer_GetCount());
+          // printf("ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n", imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
+
+          uint32_t timestamp_high = timestamp / 1000000000ULL;
+          uint32_t timestamp_low = timestamp % 1000000000ULL;
+
+          // printf("Time=%lu%09lu\r\n" ,timestamp_high , timestamp_low);
+
+          printf("RAW saved. Time=%lu%09lu, Count=%u, ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n",
+            timestamp_high , timestamp_low , (unsigned int)AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
           if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0))
@@ -263,7 +271,7 @@ int main(void)
 
               printf("\r\n========================================\r\n");
               printf("TX Packet\r\n");
-              printf("Timestamp : %llu\r\n", timestamp);
+              printf("Timestamp : %lu%09lu\r\n", timestamp_high , timestamp_low);
               printf("SeqID     : %u\r\n", seq_id);
               printf("Freq Pair : %u\r\n", pair);
               printf("Length    : %u Bytes\r\n", packet_len);

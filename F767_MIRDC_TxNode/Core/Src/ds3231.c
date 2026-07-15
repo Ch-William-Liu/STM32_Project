@@ -35,12 +35,11 @@ HAL_StatusTypeDef DS3231_GetTime(I2C_HandleTypeDef *hi2c , DS3231_Time_t *rtc)
 
 uint64_t  DS3231_ToSimpleTimestamp(DS3231_Time_t *rtc)
 {
-    return 2000000000UL
-            + ((uint64_t )rtc->year * 10000000000UL)
-            + ((uint64_t )rtc->month * 100000000UL)
-            + ((uint64_t )rtc->date * 1000000UL)
-            + ((uint64_t )rtc->hour * 10000UL)
-            + ((uint64_t )rtc->minute * 100UL)
+    return ((uint64_t )rtc->year * 10000000000ULL)
+            + ((uint64_t )rtc->month * 100000000ULL)
+            + ((uint64_t )rtc->date * 1000000ULL)
+            + ((uint64_t )rtc->hour * 10000ULL)
+            + ((uint64_t )rtc->minute * 100ULL)
             + ((uint64_t )rtc->second);
 } // end function DS3231_ToSimpleTimeStamp
 

@@ -29,13 +29,31 @@ HAL_StatusTypeDef MPU6050_ReadRaw(I2C_HandleTypeDef *hi2c , IMU_Raw_t *imu)
         return HAL_ERROR;
     } // end if I2C_Master_Transmit size not OK
 
-    imu->acc_x  = (buf[0] << 8 | buf[1]) / 16384.0f;
-    imu->acc_y  = (buf[2] << 8 | buf[3]) / 16384.0f;
-    imu->acc_z  = (buf[4] << 8 | buf[5]) / 16384.0f;
+    int16_t raw_ax;
+    int16_t raw_ay;
+    int16_t raw_az;
 
-    imu->gyro_x = (buf[8] << 8 | buf[9]) / 131.0f;
-    imu->gyro_y = (buf[10] << 8 | buf[11]) / 131.0f;
-    imu->gyro_z = (buf[12] << 8 | buf[13]) / 131.0f;
+    int16_t raw_gx;
+    int16_t raw_gy;
+    int16_t raw_gz;
+
+
+    raw_ax = (int16_t)((buf[0] << 8) | buf[1]);
+    raw_ay = (int16_t)((buf[2] << 8) | buf[3]);
+    raw_az = (int16_t)((buf[4] << 8) | buf[5]);
+
+    raw_gx = (int16_t)((buf[8] << 8) | buf[9]);
+    raw_gy = (int16_t)((buf[10] << 8) | buf[11]);
+    raw_gz = (int16_t)((buf[12] << 8) | buf[13]);
+
+
+    imu->acc_x = raw_ax / 16384.0f;
+    imu->acc_y = raw_ay / 16384.0f;
+    imu->acc_z = raw_az / 16384.0f;
+
+    imu->gyro_x = raw_gx / 131.0f;
+    imu->gyro_y = raw_gy / 131.0f;
+    imu->gyro_z = raw_gz / 131.0f;
 
     return HAL_OK;
 } // end function MPU6050_ReadRaw

@@ -38,9 +38,13 @@ FRESULT SD_LogRaw(uint64_t timestamp , IMU_Raw_t imu)
 {
     char line[128];
 
+    uint32_t timestamp_high = timestamp / 1000000000ULL;
+    uint32_t timestamp_low  = timestamp % 1000000000ULL;
+
+
     snprintf(line , sizeof(line),
-             "%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
-             timestamp,
+             "%lu%09lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\r\n",
+             timestamp_high, timestamp_low,
              imu.acc_x, imu.acc_y, imu.acc_z,
              imu.gyro_x, imu.gyro_y, imu.gyro_z);
 
@@ -92,7 +96,7 @@ FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, u
         f_write(&tx_file, header, strlen(header), &bw);
     } // end if empty file
 
-    snprintf(line, sizeof(line), "%lu,%u,%u,%u,%s\r\n" , timestamp, seq_id, freq_pair, packet_len, hex_str);
+    snprintf(line, sizeof(line), "%llu,%u,%u,%u,%s\r\n" , timestamp, seq_id, freq_pair, packet_len, hex_str);
 
     res = f_write(&tx_file, line, strlen(line), &bw);
     printf("TXLOG f_write res=%d, bw=%u, len=%u\r\n", res, bw, (unsigned int)strlen(line));
