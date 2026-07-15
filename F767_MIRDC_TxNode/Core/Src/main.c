@@ -281,7 +281,7 @@ int main(void)
               for (uint16_t i = 0; i < packet_len; i++)
               {
                   printf("%02X ", packet_buffer[i]);
-              }
+              } 
 
               printf("\r\n========================================\r\n");
               uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , pair , dac_buffer , DAC_BUFFER_SIZE);
