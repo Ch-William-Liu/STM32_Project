@@ -2,7 +2,7 @@
 #include "crc16.h"
 #include "string.h"
 
-uint16_t Packet_Build(uint8_t *packet , uint8_t freq_pair , uint8_t seq_id , uint8_t timestamp , IMU_Avg_t avg)
+uint16_t Packet_Build(uint8_t *packet , uint8_t freq_pair , uint8_t seq_id , uint64_t timestamp , IMU_Avg_t avg)
 {
     uint16_t idx = 0;
 
@@ -22,10 +22,12 @@ uint16_t Packet_Build(uint8_t *packet , uint8_t freq_pair , uint8_t seq_id , uin
     packet[idx++] = seq_id & 0xFF;
 
     // Timestamp
-    packet[idx++] = (timestamp >> 24) & 0xFF;
-    packet[idx++] = (timestamp >> 16) & 0xFF;
-    packet[idx++] = (timestamp >> 8) & 0xFF;
-    packet[idx++] = timestamp & 0xFF;
+    packet[idx++] = (timestamp / 10000000000ULL) & 0xFF;
+    packet[idx++] = (timestamp / 100000000ULL) & 0xFF;
+    packet[idx++] = (timestamp / 1000000ULL) & 0xFF;
+    packet[idx++] = (timestamp / 10000ULL) & 0xFF;
+    packet[idx++] = (timestamp / 100ULL) & 0xFF;
+    packet[idx++] = timestamp % 100;
 
     // Payload length
     packet[idx++] = PACKET_PAYLOAD_LEN;
