@@ -66,47 +66,103 @@ FRESULT SD_LogRaw(uint64_t timestamp , IMU_Raw_t imu)
     return res;
 } // end function SD_LogRaw
 
-FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, uint8_t *packet, uint16_t packet_len)
+FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, const uint8_t *packet, uint16_t packet_len)
 {
     FIL tx_file;
     FRESULT res;
     UINT bw;
-    char line[1024];
-    char hex_str[512];
 
-    hex_str[0] = '\0';
+    char line[256];
+    char hex_str[129];
+
+    uint32_t timestamp_high , timestamp_low;
+
+    if (packet == NULL || packet_len == 0)
+    {
+        printf("TXLOG invalid packet\r\n");
+        return FR_INVALID_PARAMETER;
+    } // end if packet is null
+
+    if (packet_len > 64)
+    {
+        printf("TXLOG packet too long: %u\r\n" , (unsigned int)packet_len);
+        return FR_INVALID_PARAMETER;
+    } // end if packet too long
+
+    timestamp_high = (uint32_t)(timestamp / 1000000000ULL);
+    timestamp_low = (uint32_t)(timestamp % 1000000000ULL);
 
     for (uint16_t i = 0; i < packet_len; i++)
     {
-        char temp[4];
-        snprintf(temp, sizeof(temp), "%02X", packet[i]);
-        strncat(hex_str, temp, sizeof(hex_str) - strlen(hex_str) - 1);
+        int written = snprintf(&hex_str[i * 2], sizeof(hex_str) - (i * 2), "02X" , (unsigned int)packet[i]);
+
+        if (written != 2)
+        {
+            printf("TXLOG HEX conversion failed at %u\r\n", (unsigned int)i);
+            return FR_INVALID_PARAMETER;
+        } // end if written
     } // end for
 
-    res = f_open(&tx_file, "TX_LOG.csv", FA_OPEN_APPEND | FA_WRITE);
+    hex_str[packet_len * 2] = '\0';
+
+    res = f_open(&tx_file , "TX_LOG.csv" , FA_OPEN_APPEND | FA_WRITE);
+
     printf("TXLOG f_open res=%d\r\n" , res);
+
     if (res != FR_OK)
     {
         return res;
-    } // end if write file not ok
+    } // end if open file ok
 
     if (f_size(&tx_file) == 0)
     {
-        char header[] = "Timestamp,SeqID,FreqPair,PacketLen,PacketHex\r\n";
-        f_write(&tx_file, header, strlen(header), &bw);
+        static const char header[] = "Timestamp,SeqID,FreqPair,PacketLen,PacketHex\r\n";
+
+        res = f_write(&tx_file , header , sizeof(header) - 1 , &bw);
+
+        printf("TXLOG header: res=%d, bw=%u\r\n" , res , bw);
+
+        if (res != FR_OK || bw != (UINT)(sizeof(header) - 1))
+        {
+            fclose(&tx_file);
+            return (res != FR_OK) ? res : FR_DISK_ERR;
+        } // end if res no OK or bw is invalid
     } // end if empty file
 
-    snprintf(line, sizeof(line), "%llu,%u,%u,%u,%s\r\n" , timestamp, seq_id, freq_pair, packet_len, hex_str);
+    int line_len = snprintf(line, sizeof(line) , "%lu%09lu,%u,%u,%u,%s\r\n" , 
+        (unsigned long)timestamp_high , (unsigned long)timestamp_low, (unsigned int)seq_id , (unsigned int)freq_pair , (unsigned int)packet_len , hex_str);
 
-    res = f_write(&tx_file, line, strlen(line), &bw);
-    printf("TXLOG f_write res=%d, bw=%u, len=%u\r\n", res, bw, (unsigned int)strlen(line));
+    if (line_len <= 0 || line_len >= (int)sizeof(line))
+    {
+        printf("TXLOG line formatting failed: %d\r\n" , line_len);
 
-    if (res == FR_OK)
+        f_close(&tx_file);
+        return FR_INVALID_PARAMETER;
+    } // end if line_len too big
+
+    printf("TXLOG line: %s", line);
+
+    res = f_write(&tx_file , line , (UINT)line_len , &bw);
+
+    printf("TXLOG f_write res=%d, bw=%u, len=%d\r\n" , res, bw, line_len);
+
+    if (res == FR_OK && bw == (UINT)line_len)
     {
         res = f_sync(&tx_file);
-    } // end if write ok
+        printf("TXLOG f_sync res=%d\r\n" , res);
+    } // end of res is OK
+    else if (res == FR_OK)
+    {
+        res = FR_DISK_ERR;
+        printf("TXLOG incomplete write\r\n");
+    } // end if 
 
-    f_close(&tx_file);
+    FRESULT close_res = f_close(&tx_file);
+
+    if (res == FR_OK && close_res != FR_OK)
+    {
+        res = close_res;
+    } // end if
 
     return res;
 } // end function SD_LogTxPacket
