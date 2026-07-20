@@ -16,7 +16,7 @@
 
 #define SYNC_CHIRP_START_FREQ   29000.0f
 #define SYNC_CHIRP_END_FREQ     34000.0f
-#define SYNC_CHIRP_DURATION     1.0f
+#define SYNC_CHIRP_DURATION     0.5f
 
 
 float FSK4_GetToneFreq(uint8_t freq_pair , uint8_t symbol);
