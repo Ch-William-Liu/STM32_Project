@@ -281,9 +281,10 @@ int main(void)
               for (uint8_t chirp_count = 0; chirp_count < 3; chirp_count++)
               {
                 printf("Play sync chirp %u/3\r\n" , (unsigned int)(chirp_count + 1));
+
+                DAC_Play(dac_buffer , sync_chirp_len);
               } // end for output chirp three times
 
-              DAC_Play(dac_buffer , sync_chirp_len);
             } // end else
 
             printf("Sync chirp completed.\r\n");
