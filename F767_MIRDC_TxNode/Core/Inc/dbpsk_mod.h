@@ -14,7 +14,13 @@
 #define DAC_MID             2048
 #define DAC_AMP             1200
 
+#define SYNC_CHIRP_START_FREQ   29000.0f
+#define SYNC_CHIRP_END_FREQ     34000.0f
+#define SYNC_CHIRP_DURATION     1.0f
+
+
 float FSK4_GetToneFreq(uint8_t freq_pair , uint8_t symbol);
 uint32_t FSK4_Modulate(uint8_t *packet , uint16_t packer_len , uint8_t freq_pair , uint16_t *dac_buffer , uint32_t max_samples);
+uint32_t Generate_SyncChirp(uint16_t *dac_buffer, uint32_t max_samples);
 
 #endif

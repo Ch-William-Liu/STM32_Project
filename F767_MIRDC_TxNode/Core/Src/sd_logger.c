@@ -94,7 +94,7 @@ FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, c
 
     for (uint16_t i = 0; i < packet_len; i++)
     {
-        int written = snprintf(&hex_str[i * 2], sizeof(hex_str) - (i * 2), "02X" , (unsigned int)packet[i]);
+        int written = snprintf(&hex_str[i * 2], sizeof(hex_str) - (i * 2), "%02X" , (unsigned int)packet[i]);
 
         if (written != 2)
         {
@@ -124,7 +124,7 @@ FRESULT SD_LogTxPacket(uint64_t timestamp, uint16_t seq_id, uint8_t freq_pair, c
 
         if (res != FR_OK || bw != (UINT)(sizeof(header) - 1))
         {
-            fclose(&tx_file);
+            f_close(&tx_file);
             return (res != FR_OK) ? res : FR_DISK_ERR;
         } // end if res no OK or bw is invalid
     } // end if empty file

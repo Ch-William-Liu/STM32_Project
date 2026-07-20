@@ -127,3 +127,44 @@ uint32_t FSK4_Modulate(uint8_t *packet , uint16_t packet_len , uint8_t freq_pair
 
     return sample_idx;
 } // end function FSK4_Modulate
+
+uint32_t Generate_SyncChirp(uint16_t *dac_buffer, uint32_t max_samples)
+{
+    uint32_t chirp_samples = (uint32_t)(DAC_FS * SYNC_CHIRP_DURATION);
+
+    if (chirp_samples > max_samples)
+    {
+        return 0;
+    } // end if samples too big
+
+    const float f_start = SYNC_CHIRP_START_FREQ;
+    const float f_end   = SYNC_CHIRP_END_FREQ;
+
+    const float chirp_rate = (f_end - f_start) / SYNC_CHIRP_DURATION;
+
+    for (uint32_t n = 0; n < chirp_samples; n++)
+    {
+        float t = (float)n / DAC_FS;
+
+        float phase = 2.0f * PI * (f_start * t + 0.5f * chirp_rate * t * t);
+
+        float window = 0.5f * (1.0f - cosf(2.0f * PI * (float)n / (float)(chirp_samples - 1)));
+
+        float signal = sinf(phase) * window;
+
+        int32_t dac_value = DAC_MID + (int32_t)(DAC_AMP * signal);
+
+        if (dac_value < 0)
+        {
+            dac_value = 0;
+        } // end if dac_value too small
+        else if (dac_value > 4095)
+        {
+            dac_value = 4095;
+        } // end if dac_value too big
+
+        dac_buffer[n] = (uint16_t)dac_value;
+    } // end for each sample
+
+    return chirp_samples;
+} // end function Generate_SyncChirp

@@ -67,7 +67,7 @@ TIM_HandleTypeDef htim6;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-#define DAC_BUFFER_SIZE 120000
+#define DAC_BUFFER_SIZE 192000
 
 static uint8_t packet_buffer[64];
 static uint16_t dac_buffer[DAC_BUFFER_SIZE];
@@ -259,8 +259,38 @@ int main(void)
             Relay_On();
             HAL_Delay(1000);
 
+            printf("#########################################################\r\n");
             printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
 
+            printf("Generate 20-34 kHz synchronization chirp.\r\n");
+
+            uint32_t sync_chirp_len = Generate_SyncChirp(dac_buffer , DAC_BUFFER_SIZE);
+
+            printf("Sync chirp samples = %lu.\r\n" , sync_chirp_len);
+
+            if (sync_chirp_len == 0)
+            {
+              printf("Sync chirp generation failed.\r\n");
+              printf("Dac buffer is too small.\r\n");
+
+              Relay_Off();
+              LED_GreenOnly();
+            } // end if sync chirp generate failed
+            else
+            {
+              for (uint8_t chirp_count = 0; chirp_count < 3; chirp_count++)
+              {
+                printf("Play sync chirp %u/3\r\n" , (unsigned int)(chirp_count + 1));
+              } // end for output chirp three times
+
+              DAC_Play(dac_buffer , sync_chirp_len);
+            } // end else
+
+            printf("Sync chirp completed.\r\n");
+            printf("Wait 1 second befor packets.\r\n");
+
+            HAL_Delay(1000);
+            
             IMU_Avg_t avg = AvgBuffer_GetAverage();
             AvgBuffer_Clear();
 
@@ -283,12 +313,12 @@ int main(void)
                   printf("%02X ", packet_buffer[i]);
               } 
 
-              printf("\r\n========================================\r\n");
               uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , pair , dac_buffer , DAC_BUFFER_SIZE);
 
               printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
 
               printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", pair , seq_id , packet_len , dac_len);
+              printf("\r\n========================================\r\n");
 
               DAC_Play(dac_buffer , dac_len);
 
@@ -298,6 +328,8 @@ int main(void)
                 HAL_Delay(100);
               } // end if
             } // switch pair for different freq
+
+            printf("#########################################################\r\n");
 
             seq_id++;
             HAL_Delay(1000);
