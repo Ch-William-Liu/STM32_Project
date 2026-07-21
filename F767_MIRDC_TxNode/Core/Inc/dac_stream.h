@@ -7,12 +7,17 @@
 #define DAC_STREAM_BUFFER_SIZE        4096U
 #define DAC_STREAM_HALF_SIZE          (DAC_STREAM_BUFFER_SIZE / 2U)
 
-HAL_StatusTypeDef DAC_Stream_Start(void);             // Start stream
-void DAC_Stream_Stop(void);                           // stop dma and back to mid-point
-uint8_t DAC_Stream_IsRunning(void);                   // return is running or not
+#define DAC_STREAM_PAIR_COUNT         4U
+#define DAC_STREAM_MAX_PACKET_SIZE    64U
 
-void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac);
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac);
-void HAL_DAC_ErrorCallbackCh1(DAC_HandleTypeDef *hdac);
+HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE], const uint16_t packet_lengths[DAC_STREAM_PAIR_COUNT]);
+
+void DAC_Stream_Process(void);
+
+void DAC_Stream_Stop(void);
+
+uint8_t DAC_Stream_IsRunning(void);
+uint8_t DAC_Stream_IsFinished(void);
+uint8_t DAC_Stream_HasError(void);
 
 #endif

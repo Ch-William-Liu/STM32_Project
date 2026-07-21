@@ -70,7 +70,10 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 // #define DAC_BUFFER_SIZE 192000
 
-static uint8_t packet_buffer[64];
+static uint8_t packet_buffer[4][64];
+static uint16_t packet_lengths[4];
+
+static seq_id = 0;
 // static uint16_t dac_buffer[DAC_BUFFER_SIZE];
 
 static uint16_t seq_id = 0;
@@ -231,26 +234,6 @@ int main(void)
 
         LED_GreenOnly();
 
-        // test circular DAC output
-        printf("DAC Stream test\r\n");
-        Relay_On();
-        LED_RedOnly();
-        HAL_Delay(1000);
-        HAL_StatusTypeDef stream_status = DAC_Stream_Start();
-        printf("DAC_Stream_Start ret = %d\r\n", stream_status);
-        if (stream_status == HAL_OK)
-        {
-          HAL_Delay(10000);
-          DAC_Stream_Stop();
-          printf("DAC stream test completed.\r\n");
-        } // end if start ok
-        else
-        {
-          printf("DAC stream start failed.\r\n");
-        } // end else
-        Relay_Off();
-        LED_GreenOnly();
-
         IMU_Raw_t imu;
 
         if (MPU6050_ReadRaw(&hi2c1 , &imu) == HAL_OK)
@@ -273,7 +256,6 @@ int main(void)
             timestamp_high , timestamp_low , (unsigned int)AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
-          #if 0
           if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0))
           {
             last_minute = now.minute;
@@ -284,82 +266,59 @@ int main(void)
             printf("#########################################################\r\n");
             printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
 
-            printf("Generate 20-34 kHz synchronization chirp.\r\n");
-
-            uint32_t sync_chirp_len = Generate_SyncChirp(dac_buffer , DAC_BUFFER_SIZE);
-
-            printf("Sync chirp samples = %lu.\r\n" , sync_chirp_len);
-
-            if (sync_chirp_len == 0)
-            {
-              printf("Sync chirp generation failed.\r\n");
-              printf("Dac buffer is too small.\r\n");
-
-              Relay_Off();
-              LED_GreenOnly();
-            } // end if sync chirp generate failed
-            else
-            {
-              for (uint8_t chirp_count = 0; chirp_count < 3; chirp_count++)
-              {
-                printf("Play sync chirp %u/3\r\n" , (unsigned int)(chirp_count + 1));
-
-                DAC_Play(dac_buffer , sync_chirp_len);
-              } // end for output chirp three times
-
-            } // end else
-
-            printf("Sync chirp completed.\r\n");
-            printf("Wait 1 second befor packets.\r\n");
-
-            HAL_Delay(1000);
-            
             IMU_Avg_t avg = AvgBuffer_GetAverage();
             AvgBuffer_Clear();
 
-            for (uint8_t pair = 1; pair <= 4; pair++)
+            /* build and store 4-pair packet */
+            for (uint8_t pair = 1U; pair <= 4U; pair++)
             {
-              uint16_t packet_len = Packet_Build(packet_buffer , pair , seq_id , timestamp , avg);
-              SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer, packet_len);
+              uint8_t pair_index = pair - 1U;
 
-              printf("\r\n========================================\r\n");
-              printf("TX Packet\r\n");
-              printf("Timestamp : %lu%09lu\r\n", timestamp_high , timestamp_low);
-              printf("SeqID     : %u\r\n", seq_id);
-              printf("Freq Pair : %u\r\n", pair);
-              printf("Length    : %u Bytes\r\n", packet_len);
+              packet_lengths[pair_index] = Packet_Build(packet_buffer[pair_index], pair, seq_id, timestamp, avg);
 
-              printf("HEX : ");
+              SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer[pair_index], packet_lengths[pair_index]);
 
-              for (uint16_t i = 0; i < packet_len; i++)
+              printf("Pair %u packet ready, len=%u\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index]);
+
+              LED_RedOnly();
+
+              HAL_StatusTypeDef stream_status = DAC_Stream_StartSequence(packet_buffer, packet_lengths);
+
+              printf("DAC stream ret=%d\r\n", stream_status);
+
+              if (stream_status == HAL_OK)
               {
-                  printf("%02X ", packet_buffer[i]);
-              } 
+                while ((DAC_Stream_IsFinished() == 0U) && (DAC_Stream_HasError() == 0U))
+                {
+                  DAC_Stream_Process();
+                } // end while
+                
+                DAC_Stream_Process();
+                DAC_Stream_Stop();
 
-              uint32_t dac_len = FSK4_Modulate(packet_buffer , packet_len , pair , dac_buffer , DAC_BUFFER_SIZE);
-
-              printf("FSK4 result: packet_len=%u, dac_len=%lu, buffer_size=%lu\r\n",packet_len, dac_len, (uint32_t)DAC_BUFFER_SIZE);
-
-              printf("Packet built. Pair=%d, Seq=%d, PacketLen=%d, DACLen=%lu.\r\n", pair , seq_id , packet_len , dac_len);
-              printf("\r\n========================================\r\n");
-
-              DAC_Play(dac_buffer , dac_len);
-
-              // Guard time
-              if (pair < 4)
-              {
-                HAL_Delay(100);
+                if (DAC_Stream_HasError() != 0U)
+                {
+                  printf("DAC stream error.\r\n");
+                } // end if
+                else
+                {
+                  printf("DAC stream completed.\r\n");
+                } // end else
               } // end if
-            } // switch pair for different freq
-
-            printf("#########################################################\r\n");
+              else
+              {
+                printf("DAC stream start failed.\r\n");
+              } // end else
+            } // end for
 
             seq_id++;
             HAL_Delay(1000);
             Relay_Off();
             LED_GreenOnly();
+
+            printf("#########################################################\r\n");
           } // end scheduled mission
-          #endif
+
         } // end if able to read MPU6050
         else
         {
