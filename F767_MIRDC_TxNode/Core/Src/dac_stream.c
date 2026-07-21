@@ -10,7 +10,7 @@ extern DAC_HandleTypeDef hdac;
 extern TIM_HandleTypeDef htim6;
 
 #if defined(__GNUC__)
-__attrubute__((aligned(32)))
+__attribute__((aligned(32)))
 #endif
 static uint16_t stream_buffer[DAC_STREAM_BUFFER_SIZE];
 
