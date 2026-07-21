@@ -35,6 +35,7 @@
 #include "packet.h"
 #include "dbpsk_mod.h"
 #include "sd_logger.h"
+#include "dac_stream.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,10 +68,10 @@ TIM_HandleTypeDef htim6;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-#define DAC_BUFFER_SIZE 192000
+// #define DAC_BUFFER_SIZE 192000
 
 static uint8_t packet_buffer[64];
-static uint16_t dac_buffer[DAC_BUFFER_SIZE];
+// static uint16_t dac_buffer[DAC_BUFFER_SIZE];
 
 static uint16_t seq_id = 0;
 /* USER CODE END PV */
@@ -230,6 +231,26 @@ int main(void)
 
         LED_GreenOnly();
 
+        // test circular DAC output
+        printf("DAC Stream test\r\n");
+        Relay_On();
+        LED_RedOnly();
+        HAL_Delay(1000);
+        HAL_StatusTypeDef stream_status = DAC_Stream_Start();
+        printf("DAC_Stream_Start ret = %d\r\n", stream_status);
+        if (stream_status == HAL_OK)
+        {
+          HAL_Delay(10000);
+          DAC_Stream_Stop();
+          printf("DAC stream test completed.\r\n");
+        } // end if start ok
+        else
+        {
+          printf("DAC stream start failed.\r\n");
+        } // end else
+        Relay_Off();
+        LED_GreenOnly();
+
         IMU_Raw_t imu;
 
         if (MPU6050_ReadRaw(&hi2c1 , &imu) == HAL_OK)
@@ -252,6 +273,7 @@ int main(void)
             timestamp_high , timestamp_low , (unsigned int)AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
+          #if 0
           if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0))
           {
             last_minute = now.minute;
@@ -337,6 +359,7 @@ int main(void)
             Relay_Off();
             LED_GreenOnly();
           } // end scheduled mission
+          #endif
         } // end if able to read MPU6050
         else
         {
