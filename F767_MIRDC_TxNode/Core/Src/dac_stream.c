@@ -227,7 +227,7 @@ static void AdvanceStateIfNeeded(void)
     {
       if (state_sample_index >= SILENCE_SAMPLES)
       {
-        state_sample_index - 0U;
+        state_sample_index = 0U;
         current_pair_index = 0U;
 
         stream_state = DAC_STREAM_STATE_PACKET;
@@ -368,7 +368,7 @@ HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR
     } // end if
 
     stream_packet_lengths[pair] = packet_lengths[pair];
-    memcpy(stream_packets[pair], packets[pair], packet_lengths[pairs]);
+    memcpy(stream_packets[pair], packets[pair], packet_lengths[pair]);
   } // end for
 
   fill_first_half_request = 0U;
@@ -389,7 +389,7 @@ HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR
 
   if (stream_error != 0U)
   {
-    return HAL_ERROR
+    return HAL_ERROR;
   } // end if error
 
   HAL_StatusTypeDef status = HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t *)stream_buffer, DAC_STREAM_BUFFER_SIZE, DAC_ALIGN_12B_R);

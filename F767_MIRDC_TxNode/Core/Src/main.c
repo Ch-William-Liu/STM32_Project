@@ -73,7 +73,6 @@ UART_HandleTypeDef huart3;
 static uint8_t packet_buffer[4][64];
 static uint16_t packet_lengths[4];
 
-static seq_id = 0;
 // static uint16_t dac_buffer[DAC_BUFFER_SIZE];
 
 static uint16_t seq_id = 0;
