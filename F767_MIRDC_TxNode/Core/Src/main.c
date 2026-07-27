@@ -90,7 +90,7 @@ static void MX_SPI1_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void Execute_TransmitSequence(uint64_t timestamp, uint32_t timestamp_high, uint32_t timestamp_low);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -138,7 +138,97 @@ void DAC_Play(uint16_t *buffer , uint32_t sample_len)
   
   HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
   HAL_TIM_Base_Stop(&htim6);
-}
+} // end function DAC_Play
+
+static void Execute_TransmitSequence(uint64_t timestamp, uint32_t timestamp_high, uint32_t timestamp_low)
+{
+  IMU_Avg_t avg = AvgBuffer_GetAverage();
+  const uint16_t avg_count = AvgBuffer_GetCount();
+
+  LED_BlueOnly();
+  Relay_On();
+
+  // delay for stable Relay
+  HAL_Delay(1000);
+
+  printf("#########################################################\r\n");
+  printf("Scheduled transmit triggered. Count=%u\r\n" , (unsigned int)avg_count);
+
+  // only build package
+  for (uint8_t pair = 1U; pair <= 4U; pair++)
+  {
+    const uint8_t pair_index = pair - 1U;
+    
+    packet_lengths[pair_index] = Packet_Build(packet_buffer[pair_index], pair, seq_id, timestamp, avg);
+
+    printf("Pair %u built, len=%u\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index]);
+  } // end for
+
+  // write in SD card
+  uint8_t log_success = 1U;
+
+  for (uint8_t pair = 1U; pair <= 4U; pair++)
+  {
+    const uint8_t pair_index = pair - 1U;
+
+    FRESULT log_result = SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer[pair_index], packet_lengths[pair_index]);
+
+    if (log_result != FR_OK)
+    {
+      printf("Pair %u TX log failed. res=%d\r\n", (unsigned int)pair, log_result);
+
+      log_success = 0U;
+      break;
+    } // end if
+
+    printf("Pair %u ready, len=%u,timestamp=%lu%09lu\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index], (unsigned long)timestamp_high, (unsigned long)timestamp_low);
+  } // end for
+
+  if (log_success == 0U)
+  {
+    Relay_Off();
+    LED_GreenOnly();
+
+    printf("Transmit cancelled because TX log failed.\r\n");
+    printf("#########################################################\r\n");
+  } // end if
+
+  LED_RedOnly();
+  HAL_StatusTypeDef stream_status = DAC_Stream_StartSequence(packet_buffer, packet_lengths);
+
+  printf("DAC stream ret=%d\r\n", stream_status);
+
+  if (stream_status == HAL_OK)
+  {
+    while ((DAC_Stream_IsFinished() == 0U) && (DAC_Stream_HasError() == 0U))
+    {
+      DAC_Stream_Process();
+    } // end while
+    
+    DAC_Stream_Stop();
+
+    if (DAC_Stream_HasError() != 0U)
+    {
+      printf("DAC stream error.\r\n");
+    } // end if
+    else
+    {
+      printf("DAC stream completed.\r\n");
+
+      seq_id++;
+      AvgBuffer_Clear();
+    } // end else
+  }
+  else
+  {
+    printf("DAC stream start failed.\r\n");
+  } // end else
+
+  Relay_Off();
+  LED_GreenOnly();
+
+  printf("#########################################################\r\n");
+} // end function Excute_TransmitSequence
 /* USER CODE END 0 */
 
 /**
@@ -206,10 +296,23 @@ int main(void)
     printf("SD init OK.\r\n");
   } // end else
 
+  printf("Building DAC symbol cache...\r\n");
+  DAC_Stream_Init();
+  printf("DAC symbol cache ready.\r\n");
+
   LED_GreenOnly();    // Standby state
 
+// avoid dac output once we boot
+uint32_t boot_tick = HAL_GetTick();
+
+
   printf("System ready.\r\n");
-  DS3231_Time_t now;
+  DS3231_Time_t now = {0};
+
+  if (DS3231_GetTime(&hi2c2, &now) != HAL_OK)
+  {
+    printf("Initial DS3231 read failed.\r\n");
+  } // end if unable to read time
 
   uint8_t last_minute = now.minute;
   uint8_t last_second = now.second;
@@ -255,67 +358,11 @@ int main(void)
             timestamp_high , timestamp_low , (unsigned int)AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
 
           // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
-          if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0))
+          if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0U) && (HAL_GetTick() - boot_tick >= 60000U) && (now.second == 0U))
           {
             last_minute = now.minute;
-            LED_BlueOnly();
-            Relay_On();
-            HAL_Delay(1000);
-
-            printf("#########################################################\r\n");
-            printf("Scheduled transmit triggered. Minute=%d, Count=%d.\r\n" , now.minute , AvgBuffer_GetCount());
-
-            IMU_Avg_t avg = AvgBuffer_GetAverage();
-            AvgBuffer_Clear();
-
-            /* build and store 4-pair packet */
-            for (uint8_t pair = 1U; pair <= 4U; pair++)
-            {
-              uint8_t pair_index = pair - 1U;
-
-              packet_lengths[pair_index] = Packet_Build(packet_buffer[pair_index], pair, seq_id, timestamp, avg);
-
-              SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer[pair_index], packet_lengths[pair_index]);
-
-              printf("Pair %u packet ready, len=%u\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index]);
-
-              LED_RedOnly();
-
-              HAL_StatusTypeDef stream_status = DAC_Stream_StartSequence(packet_buffer, packet_lengths);
-
-              printf("DAC stream ret=%d\r\n", stream_status);
-
-              if (stream_status == HAL_OK)
-              {
-                while ((DAC_Stream_IsFinished() == 0U) && (DAC_Stream_HasError() == 0U))
-                {
-                  DAC_Stream_Process();
-                } // end while
-                
-                DAC_Stream_Process();
-                DAC_Stream_Stop();
-
-                if (DAC_Stream_HasError() != 0U)
-                {
-                  printf("DAC stream error.\r\n");
-                } // end if
-                else
-                {
-                  printf("DAC stream completed.\r\n");
-                } // end else
-              } // end if
-              else
-              {
-                printf("DAC stream start failed.\r\n");
-              } // end else
-            } // end for
-
-            seq_id++;
-            HAL_Delay(1000);
-            Relay_Off();
-            LED_GreenOnly();
-
-            printf("#########################################################\r\n");
+            
+            Execute_TransmitSequence(timestamp, timestamp_high, timestamp_low);
           } // end scheduled mission
 
         } // end if able to read MPU6050

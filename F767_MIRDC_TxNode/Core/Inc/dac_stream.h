@@ -11,7 +11,7 @@
 #define DAC_STREAM_MAX_PACKET_SIZE    64U
 
 HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE], const uint16_t packet_lengths[DAC_STREAM_PAIR_COUNT]);
-
+void DAC_Stream_Init(void);
 void DAC_Stream_Process(void);
 
 void DAC_Stream_Stop(void);

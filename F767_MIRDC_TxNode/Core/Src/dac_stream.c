@@ -5,67 +5,65 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
-#define PI 3.14159265358979323846f
+#define PI                          3.14159265358979323846f
 
 #define SYNC_CHIRP_REPEAT_COUNT     3U
-
-#define SILENCE_DURATION_SEC        1.0f
+#define POST_SYNC_SILENCE_SEC       1.0f
 #define PAIR_GUARD_DURATION_MS      100.0f
 
 #define CHIRP_DURATION_SEC          0.0035f
-#define GI_DURATION_SEC             0.0005f
 
-#define CHIRP_SAMPLES         ((uint32_t)(DAC_FS * CHIRP_DURATION_SEC + 0.5f))
-#define GI_SAMPLES            ((uint32_t)(DAC_FS * GI_DURATION_SEC + 0.5f))
-#define PAIR_GUARD_SAMPLES    ((uint32_t)(DAC_FS * PAIR_GUARD_DURATION_MS / 1000.0f + 0.5f))
-#define SILENCE_SAMPLES       ((uint32_t)(DAC_FS * SILENCE_DURATION_SEC) + 0.5f)
+#define CHIRP_SAMPLES               ((uint32_t)(DAC_FS * CHIRP_DURATION_SEC + 0.5f))
+#define POST_SYMC_SILENCE_SAMPLES   ((uint32_t)(DAC_FS * POST_SYNC_SILENCE_SEC + 0.5f))
+#define PAIR_GUARD_SAMPLES          ((uint32_t)(DAC_FS * PAIR_GUARD_DURATION_MS / 1000.0f + 0.5f))
+
+#define SYMBOL_PAIR_COUNT           4U
+#define SYMBOL_VALUE_COUNT          4U
+#define DRAIN_CALLBACK_TAEGET       2U
 
 extern DAC_HandleTypeDef hdac;
 extern TIM_HandleTypeDef htim6;
 
-// DMA buffer
 #if defined(__GNUC__)
 __attribute__((aligned(32)))
 #endif
 static uint16_t stream_buffer[DAC_STREAM_BUFFER_SIZE];
 
+#if defined(__GNUC__)
+__attribute__((aligned(32)))
+#endif
+
+static uint16_t symbol_cache[SYMBOL_PAIR_COUNT][SYMBOL_VALUE_COUNT][SAMPLES_PER_SYMBOL];
+static uint8_t symbol_cache_ready = 0U;
+
 static volatile uint8_t fill_first_half_request = 0U;
 static volatile uint8_t fill_second_half_request = 0U;
-
 static volatile uint8_t stream_running = 0U;
 static volatile uint8_t stream_finished = 0U;
 static volatile uint8_t stream_error = 0U;
 
-// store the re-built packets
 static uint8_t stream_packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE];
+
 static uint16_t stream_packet_lengths[DAC_STREAM_PAIR_COUNT];
 
-// status of stream
 typedef enum
 {
   DAC_STREAM_STATE_IDLE = 0,
   DAC_STREAM_STATE_SYNC_CHIRP,
-  DAC_STREAM_STATE_SILENCE,
+  DAC_STREAM_STATE_POST_SYNC_SILENCE,
   DAC_STREAM_STATE_PACKET,
   DAC_STREAM_STATE_PAIR_GUARD,
+  DAC_STREAM_STATE_DRAIN,
   DAC_STREAM_STATE_FINISHED
 } DAC_StreamState_t;
 
 static DAC_StreamState_t stream_state = DAC_STREAM_STATE_IDLE;
-
 static uint32_t state_sample_index = 0U;
-
 static uint8_t sync_chirp_count = 0U;
-
-/*
-Current Frequency Pair index:
-  0 -> Pair 1
-  1 -> Pair 2
-  2 -> Pair 3
-  3 -> Pair 4
-*/
 static uint8_t current_pair_index = 0U;
+static volatile uint8_t drain_callback_count = 0U;
 
 /* 
 Frequency table
@@ -93,17 +91,17 @@ Frequency table
     |           4       |       11  |           34.2            |           34.1->34.3          |
     |-------------------|-----------|---------------------------|-------------------------------|
 */
-static const float chirp_center_freq_table[4][4] =
+static const float chirp_center_freq_table[4][4] = 
 {
-    {28200, 28600, 29000, 29400},
-    {29800, 30200, 30600, 31000},
-    {31400, 31800, 32200, 32600},
-    {33000, 33400, 33800, 34200}
+  {28200.0f, 28600.0f, 29000.0f, 29400.0f},
+  {29800.0f, 30200.0f, 30600.0f, 31000.0f},
+  {31400.0f, 31800.0f, 32200.0f, 32600.0f},
+  {33000.0f, 33400.0f, 33800.0f, 34200.0f}
 };
 
-static uint16_t FloatToDAC(float singal)
+static uint16_t FloatToDAC(float signal)
 {
-  int32_t dac_value = DAC_MID + (int32_t)(DAC_AMP * singal);
+  int32_t dac_value = DAC_MID + (int32_t)(DAC_AMP * signal);
 
   if (dac_value < 0)
   {
@@ -117,7 +115,6 @@ static uint16_t FloatToDAC(float singal)
   return (uint16_t)dac_value;
 } // end function FloatToDAC
 
-/* Sync chirp sample */
 static uint32_t GetSyncChirpSamples(void)
 {
   return (uint32_t)(DAC_FS * SYNC_CHIRP_DURATION + 0.5f);
@@ -127,80 +124,114 @@ static uint16_t GenerateSyncChirpSample(uint32_t n)
 {
   const uint32_t total_samples = GetSyncChirpSamples();
 
-  if (total_samples < 2U || n >= total_samples)
+  if ((total_samples < 2U) || (n >= total_samples))
   {
     return DAC_MID;
-  } // end if sample too small or reach the end
+  } // end if total sample too big or idx 
 
   const float t = (float)n / DAC_FS;
 
   const float chirp_rate = (SYNC_CHIRP_END_FREQ - SYNC_CHIRP_START_FREQ) / SYNC_CHIRP_DURATION;
-
   const float phase = 2.0f * PI * (SYNC_CHIRP_START_FREQ * t + 0.5f * chirp_rate * t * t);
-
   const float window = 0.5f * (1.0f - cosf(2.0f * PI * (float)n / (float)(total_samples - 1U)));
 
-  const float signal = sinf(phase) * window;
-
-  return FloatToDAC(signal);
+  return FloatToDAC(sinf(phase) * window);
 } // end function GenerateSyncChirpSample
 
-/* Packet chirp symbol sample */
-static uint16_t GeneratePacketSample(uint8_t pair_index, uint32_t packet_sample)
+static void BuildSymbolCacheEntry(uint8_t pair_index, uint8_t symbol)
 {
+  const float center_freq = chirp_center_freq_table[pair_index][symbol];
+
+  const float f_start = center_freq - 100.0f;
+  const float f_end = center_freq + 100.0f;
+
+  const float chirp_duration = (float)CHIRP_SAMPLES / DAC_FS;
+
+  const float chirp_rate = (f_end - f_start) / chirp_duration;
+
+  for (uint32_t n = 0U; n < CHIRP_SAMPLES; n++)
+  {
+    const float t = (float)n / DAC_FS;
+    const float phase = 2.0f * PI * (f_start * t + 0.5f * chirp_rate * t * t);
+    const float window = 0.5f * (1.0f - cosf(2.0f * PI * (float)n / (float)(CHIRP_SAMPLES - 1U)));
+
+    symbol_cache[pair_index][symbol][n] = FloatToDAC(sinf(phase) * window);
+  } // end for
+
+  for (uint32_t n = CHIRP_SAMPLES; n < SAMPLES_PER_SYMBOL; n++)
+  {
+    symbol_cache[pair_index][symbol][n] = DAC_MID;
+  } // end for
+} // function BuildSymbolCacheEntry
+
+static void BuildALLSymbolCaches(void)
+{
+  if (symbol_cache_ready != 0U)
+  {
+    return;
+  } // end if cache not ready
+
+  for (uint8_t pair = 0U; pair < SYMBOL_VALUE_COUNT; pair++)
+  {
+    for (uint8_t symbol = 0U; symbol < SYMBOL_VALUE_COUNT; symbol++)
+    {
+      BuildSymbolCacheEntry(pair, symbol);
+    } // end for
+  } // end for
+
+  symbol_cache_ready = 1U;
+} // end function BuildAllSymbolCaches
+
+void DAC_Stream_Init(void)
+{
+  BuildALLSymbolCaches();
+} // end function DAC_Stream_Init
+
+static uint16_t GetPacketSample(uint8_t pair_index, uint32_t packet_sample)
+{
+  if (pair_index >= DAC_STREAM_PAIR_COUNT)
+  {
+    stream_error = 1U;
+    return DAC_MID;
+  } // end if
+
   const uint16_t packet_len = stream_packet_lengths[pair_index];
-  const uint32_t total_symbols = (uint32_t)packet_len * 4U;
-  const uint32_t total_packet_samples = total_symbols * SAMPLES_PER_SYMBOL;
+  const uint32_t total_packet_samples = (uint32_t)packet_len * 4U * SAMPLES_PER_SYMBOL;
 
   if (packet_sample >= total_packet_samples)
   {
     return DAC_MID;
-  } // end if packet_sample too big
+  } // end if
 
   const uint32_t symbol_number = packet_sample / SAMPLES_PER_SYMBOL;
   const uint32_t sample_in_symbol = packet_sample % SAMPLES_PER_SYMBOL;
 
   const uint32_t byte_index = symbol_number / 4U;
   const uint32_t symbol_in_byte = symbol_number % 4U;
-  const uint8_t byte = stream_packets[pair_index][byte_index];
 
-  /*
-     * symbol_in_byte：
-     *
-     * 0 → bit 7:6 → shift 6
-     * 1 → bit 5:4 → shift 4
-     * 2 → bit 3:2 → shift 2
-     * 3 → bit 1:0 → shift 0
-  */
-  const uint8_t shift = (uint8_t)(6U - 2U * symbol_in_byte);
-  const uint8_t symbol = (uint8_t)((byte>>shift) & 0x03U);
-
-  /* output DAC_MID during GI */
-  if (sample_in_symbol > CHIRP_SAMPLES)
+  if (byte_index >= packet_len)
   {
+    stream_error = 1U;
     return DAC_MID;
   } // end if
 
-  const float center_freq = chirp_center_freq_table[pair_index][symbol];
-  const float f_start = center_freq - 100.0f;
-  const float f_end = center_freq + 100.0f;
-  const float chirp_time = (float)CHIRP_SAMPLES / DAC_FS;
-  const float chirp_rate = (f_end - f_start) / chirp_time;
-  const float t = (float)sample_in_symbol / DAC_FS;
-  const float phase = 2.0 * PI * (f_start * t + 0.5f * chirp_rate * t * t);
+  const uint8_t byte = stream_packets[pair_index][byte_index];
+  const uint8_t shift = (uint8_t)(6U - 2U * symbol_in_byte);
 
-  const float window = 0.5f * (1.0f * cosf(2.0f * PI * (float)sample_in_symbol / (float)(CHIRP_SAMPLES - 1U)));
-  const float signal = sinf(phase) * window;
+  const uint8_t symbol = (uint8_t)((byte>>shift) & 0x03U);
 
-  return FloatToDAC(signal);
-} // end function GeneratePacketSample
+  return symbol_cache[pair_index][symbol][sample_in_symbol];
+} // end function GetPacketSample
 
-/* State transition */
 static uint32_t GetCurrentPacketTotalSamples(void)
 {
-  const uint32_t total_symbols = (uint32_t)stream_packet_lengths[current_pair_index] * 4U;
+  if (current_pair_index >= DAC_STREAM_PAIR_COUNT)
+  {
+    stream_error = 1U;
+    return 0U;
+  } // end if
 
-  return total_symbols * SAMPLES_PER_SYMBOL;
+  return (uint32_t)stream_packet_lengths[current_pair_index] * 4U * SAMPLES_PER_SYMBOL;
 } // end function GetCurrentPacketTotalSamples
 
 static void AdvanceStateIfNeeded(void)
@@ -216,25 +247,22 @@ static void AdvanceStateIfNeeded(void)
 
         if (sync_chirp_count >= SYNC_CHIRP_REPEAT_COUNT)
         {
-          stream_state = DAC_STREAM_STATE_SILENCE;
+          stream_state = DAC_STREAM_STATE_POST_SYNC_SILENCE;
         } // end if
       } // end if
-
       break;
     } // end case DAC_STREAM_STATE_SYNC_CHIRP
-  
-    case DAC_STREAM_STATE_SILENCE:
+
+    case DAC_STREAM_STATE_POST_SYNC_SILENCE:
     {
-      if (state_sample_index >= SILENCE_SAMPLES)
+      if (state_sample_index >= POST_SYMC_SILENCE_SAMPLES)
       {
         state_sample_index = 0U;
         current_pair_index = 0U;
-
         stream_state = DAC_STREAM_STATE_PACKET;
-      } // end if
-
+      } // end if 
       break;
-    } // end case DAC_STREAM_STATE_SILENCE
+    } // end case DAC_STREAM_STATE_POST_SYNC_SILENCE
 
     case DAC_STREAM_STATE_PACKET:
     {
@@ -248,12 +276,12 @@ static void AdvanceStateIfNeeded(void)
         } // end if
         else
         {
-          stream_state = DAC_STREAM_STATE_FINISHED;
+          drain_callback_count = 0U;
+          stream_state = DAC_STREAM_STATE_DRAIN;
         } // end else
       } // end if
-
       break;
-    } // end case DAC_STRAM_STATE_PACKET
+    } // end case DAC_STREAM_STATE_PACKET
 
     case DAC_STREAM_STATE_PAIR_GUARD:
     {
@@ -261,113 +289,100 @@ static void AdvanceStateIfNeeded(void)
       {
         state_sample_index = 0U;
         current_pair_index++;
-
         stream_state = DAC_STREAM_STATE_PACKET;
       } // end if
-
       break;
     } // end case DAC_STREAM_STATE_PAIR_GUARD
+
     default:
+    {
       break;
-  } // end switch
+    } // end defaule
+  } // ebd switch
 } // end function AdvanceStateIfNeeded
 
-/* Produce next sample */
 static uint16_t GenerateNextSample(void)
 {
-  uint16_t sample = DAC_MID;
-
   AdvanceStateIfNeeded();
 
   switch (stream_state)
   {
     case DAC_STREAM_STATE_SYNC_CHIRP:
     {
-      sample = GenerateSyncChirpSample(state_sample_index);
+      const uint16_t sample = GenerateSyncChirpSample(state_sample_index);
+
       state_sample_index++;
 
-      break;
-    } // end case DAC_STREAM_STATE_SYNC_CHIRP
-  
-    case DAC_STREAM_STATE_SILENCE:
+      return sample;
+    } // end case DAC_STREAM_STATE_SYMC_CHIRP
+
+    case DAC_STREAM_STATE_POST_SYNC_SILENCE:
     {
-      sample = DAC_MID;
       state_sample_index++;
-
-      break;
-    } // end case DAC_STREAM_STATE_SILENCE
+      return DAC_MID;
+    } // end case DAC_STREAM_STATE_POST_SYNC_SILENCE
 
     case DAC_STREAM_STATE_PACKET:
     {
-      sample = GeneratePacketSample(current_pair_index, state_sample_index);
+      const uint16_t sample = GetPacketSample(current_pair_index, state_sample_index);
       state_sample_index++;
 
-      break;
-    } // end case DAC_STREAM_STATE_PACKET
+      return sample;
+    }  // end case DAC_STREAM_STATE_PACKET
 
     case DAC_STREAM_STATE_PAIR_GUARD:
     {
-      sample = DAC_MID;
       state_sample_index++;
-
-      break;
+      return DAC_MID;
     } // end case DAC_STREAM_STATE_PAIR_GUARD
-  
+
+    case DAC_STREAM_STATE_DRAIN:
     case DAC_STREAM_STATE_FINISHED:
-    {
-      sample = DAC_MID;
-
-      stream_finished = 1U;
-
-      break;
-    } // end case DAC_STREAM_STATE_FINISHED
-
+    case DAC_STREAM_STATE_IDLE:
     default:
     {
-      sample = DAC_MID;
-      break;
-    } // end case default
+      return DAC_MID;
+    } // end default
   } // end switch
-
-  return sample;
 } // end function GenerateNextSample
 
-/* Fill DMA half buffer */
 static void FillStreamBuffer(uint32_t offset, uint32_t length)
 {
   if ((offset + length) > DAC_STREAM_BUFFER_SIZE)
   {
     stream_error = 1U;
     return;
-  } // end if offser + length too big
+  } // end if
 
   for (uint32_t i = 0U; i < length; i++)
   {
     stream_buffer[offset + i] = GenerateNextSample();
   } // end for
-} // end function FillStreamBuffer
+} // end function static void FillStreamBuffer
 
-/* Start / Process / Stop */
 HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE], const uint16_t packet_lengths[DAC_STREAM_PAIR_COUNT])
 {
-  if (packets == NULL || packet_lengths == NULL)
+  if ((packets == NULL) || (packet_lengths == NULL))
   {
     return HAL_ERROR;
-  } // end if packet and its length is NULL
+  } // end if
 
   if (stream_running != 0U)
   {
     return HAL_BUSY;
-  } // end if stream is running
+  } // end if
+
+  BuildALLSymbolCaches();
 
   for (uint8_t pair = 0U; pair < DAC_STREAM_PAIR_COUNT; pair++)
   {
-    if (packet_lengths[pair] == 0U || packet_lengths[pair] > DAC_STREAM_MAX_PACKET_SIZE)
+    if ((packet_lengths[pair] == 0U) || (packet_lengths[pair] > DAC_STREAM_MAX_PACKET_SIZE))
     {
       return HAL_ERROR;
     } // end if
 
     stream_packet_lengths[pair] = packet_lengths[pair];
+
     memcpy(stream_packets[pair], packets[pair], packet_lengths[pair]);
   } // end for
 
@@ -381,35 +396,37 @@ HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR
   sync_chirp_count = 0U;
   current_pair_index = 0U;
   state_sample_index = 0U;
+  drain_callback_count = 0U;
 
   stream_state = DAC_STREAM_STATE_SYNC_CHIRP;
 
   FillStreamBuffer(0U, DAC_STREAM_HALF_SIZE);
-  FillStreamBuffer(DAC_STREAM_HALF_SIZE , DAC_STREAM_HALF_SIZE);
+  FillStreamBuffer(DAC_STREAM_HALF_SIZE, DAC_STREAM_HALF_SIZE);
 
   if (stream_error != 0U)
   {
+    stream_state = DAC_STREAM_STATE_IDLE;
     return HAL_ERROR;
-  } // end if error
+  } // end if
 
   HAL_StatusTypeDef status = HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t *)stream_buffer, DAC_STREAM_BUFFER_SIZE, DAC_ALIGN_12B_R);
 
   if (status != HAL_OK)
   {
+    stream_state = DAC_STREAM_STATE_IDLE;
     return status;
-  } // end if start dma OK
+  } // end if status not ok
 
   status = HAL_TIM_Base_Start(&htim6);
 
   if (status != HAL_OK)
   {
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
-
+    stream_state = DAC_STREAM_STATE_IDLE;
     return status;
-  } // end if TIM start not OK
+  } // end if
 
   stream_running = 1U;
-
   return HAL_OK;
 } // end function DAC_Stream_StartSequence
 
@@ -418,35 +435,33 @@ void DAC_Stream_Process(void)
   if (stream_running == 0U)
   {
     return;
-  } // end if not running
+  } // end if
 
   if (fill_first_half_request != 0U)
   {
     fill_first_half_request = 0U;
     FillStreamBuffer(0U, DAC_STREAM_HALF_SIZE);
-  } // end if first half not request
-
+  } // end if
+  
   if (fill_second_half_request != 0U)
   {
     fill_second_half_request = 0U;
-    FillStreamBuffer(DAC_STREAM_BUFFER_SIZE , DAC_STREAM_BUFFER_SIZE);
-  } // end if second half not request
-} // end DAC_Stream_Process
-
+    FillStreamBuffer(DAC_STREAM_HALF_SIZE, DAC_STREAM_HALF_SIZE);
+  } // end if
+} // end function DAC_Stream_Process
 
 void DAC_Stream_Stop(void)
 {
   stream_running = 0U;
 
   HAL_TIM_Base_Stop(&htim6);
-
   HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
 
   HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, DAC_MID);
-  
+  fill_first_half_request = 0U;
+  fill_second_half_request = 0U;
   stream_state = DAC_STREAM_STATE_IDLE;
 } // end function DAC_Stream_Stop
-
 
 uint8_t DAC_Stream_IsRunning(void)
 {
@@ -461,30 +476,56 @@ uint8_t DAC_Stream_IsFinished(void)
 uint8_t DAC_Stream_HasError(void)
 {
   return stream_error;
-} // end function DAC_StreamHasError
+} // end function DAC_Stream_HasError
 
-/* HAL callbacks */
+static void HandleDrainCallback(void)
+{
+  if (stream_state != DAC_STREAM_STATE_DRAIN)
+  {
+    return;
+  } // end if
+
+  if (drain_callback_count < 0xFFU)
+  {
+    drain_callback_count++;
+  } // end if
+
+  if (drain_callback_count >= DRAIN_CALLBACK_TAEGET)
+  {
+    stream_state = DAC_STREAM_STATE_FINISHED;
+    stream_finished = 1U;
+  } // end if
+} // end function HandleDrainCallback
+
 void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
 {
-  if ((hdac_handle != NULL) && (hdac_handle->Instance == DAC) && (stream_running != 0U))
+  if ((hdac_handle == NULL) || (hdac_handle->Instance != DAC) || (stream_running == 0U))
   {
-    fill_first_half_request = 1U;
-  } // end if 
+      return;
+  } // end if
+
+  fill_first_half_request = 1U;
+  HandleDrainCallback();
 } // end function HAL_DAC_ConvHalfCpltCallbackCh1
 
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
 {
-  if ((hdac_handle != NULL) && (hdac_handle->Instance == DAC) && (stream_running != 0U))
+  if ((hdac_handle == NULL) || (hdac_handle->Instance != DAC) || (stream_running == 0U))
   {
-    fill_second_half_request = 1U;
-  } // end if
+      return;
+  } // end if 
+
+  fill_second_half_request = 1U;
+  HandleDrainCallback();
 } // end function HAL_DAC_ConvCpltCallbackCh1
 
 void HAL_DAC_ErrorCallbackCh1(DAC_HandleTypeDef *hdac_handle)
 {
-  if ((hdac_handle != NULL) && (hdac_handle->Instance == DAC))
+  if ((hdac_handle == NULL) || (hdac_handle->Instance != DAC))
   {
-    stream_error = 1U;
-    stream_running = 0U;
+      return;
   } // end if
+
+  stream_error = 1U;
+  stream_running = 0U;
 } // end function HAL_DAC_ErrorCallbackCh1
