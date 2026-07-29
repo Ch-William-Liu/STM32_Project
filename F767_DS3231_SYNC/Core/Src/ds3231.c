@@ -70,7 +70,10 @@ HAL_StatusTypeDef DS3231_SetDateTime(I2C_HandleTypeDef *hi2c, const DS3231_Datet
   data[5] = DecimalToBCD(dateTime->month);
   data[6] = DecimalToBCD((uint8_t)(dateTime->year - 2000U));
 
-  return HAL_I2C_Mem_Write(hi2c, DS3231_ADDRESS , 0x00U, I2C_MEMADD_SIZE_8BIT, data , 7U, DS3231_TIMEOUT_MS);
+  HAL_StatusTypeDef status;
+  status = HAL_I2C_Mem_Write(hi2c, DS3231_ADDRESS , 0x00U, I2C_MEMADD_SIZE_8BIT, data , 7U, DS3231_TIMEOUT_MS);
+
+  return status;
 } // end function DS3231_SetDateTime
 
 HAL_StatusTypeDef DS3231_GetDataTime(I2C_HandleTypeDef *hi2c, DS3231_Datetime_t *dateTime)

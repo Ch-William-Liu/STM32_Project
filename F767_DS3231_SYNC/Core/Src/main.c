@@ -135,6 +135,13 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
+  HAL_StatusTypeDef status;
+  char msg[50];
+  status = DS3231_IsReady(&hi2c2);
+
+  sprintf(msg, "RTC Ready=%d\r\n", status);
+  UART_SendString(msg);
+
   UART_SendString("\r\nDS3231 SYNC\r\n");
   
   if (DS3231_IsReady(&hi2c2) == HAL_OK)
@@ -556,11 +563,19 @@ static void ProcessTimeString(const char *timeString)
 
   requestedTime.day = DS3231_CalculateDay(requestedTime.year, requestedTime.month, requestedTime.date);
 
-  if (DS3231_SetDateTime(&hi2c2, &requestedTime) != HAL_OK)
-  {
-    UART_SendString("ERROR,RTC_WRITE\r\n");
-    return;
-  } // end if set time not OK
+  HAL_StatusTypeDef status;
+  status = DS3231_SetDateTime(&hi2c2, &requestedTime);
+
+  char msg[50];
+  sprintf(msg, "Write Status=%d\r\n", status);
+
+UART_SendString(msg);
+
+if(status != HAL_OK)
+{
+  UART_SendString("ERROR,RTC_WRITE\r\n");
+  return;
+}
 
   HAL_Delay(20U);
 

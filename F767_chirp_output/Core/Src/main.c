@@ -1,5 +1,5 @@
 /* USER CODE BEGIN Header */
-/* F767_MIRDC_TxNode */
+/* F767_chirp_output */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -19,23 +19,11 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "fatfs.h"
+#include "string.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-#include <string.h>
 
-#include "imu_types.h"
-#include "led_ctrl.h"
-#include "relay_ctrl.h"
-#include "ds3231.h"
-#include "mpu6050.h"
-#include "avg_buffer.h"
-#include "packet.h"
-#include "dbpsk_mod.h"
-#include "sd_logger.h"
-#include "dac_stream.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,28 +42,40 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+#if defined ( __ICCARM__ ) /*!< IAR Compiler */
+#pragma location=0x2007c000
+ETH_DMADescTypeDef  DMARxDscrTab[ETH_RX_DESC_CNT]; /* Ethernet Rx DMA Descriptors */
+#pragma location=0x2007c0a0
+ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT]; /* Ethernet Tx DMA Descriptors */
+
+#elif defined ( __CC_ARM )  /* MDK ARM Compiler */
+
+__attribute__((at(0x2007c000))) ETH_DMADescTypeDef  DMARxDscrTab[ETH_RX_DESC_CNT]; /* Ethernet Rx DMA Descriptors */
+__attribute__((at(0x2007c0a0))) ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT]; /* Ethernet Tx DMA Descriptors */
+
+#elif defined ( __GNUC__ ) /* GNU Compiler */
+
+ETH_DMADescTypeDef DMARxDscrTab[ETH_RX_DESC_CNT] __attribute__((section(".RxDecripSection"))); /* Ethernet Rx DMA Descriptors */
+ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecripSection")));   /* Ethernet Tx DMA Descriptors */
+#endif
+
+ETH_TxPacketConfig TxConfig;
 
 DAC_HandleTypeDef hdac;
 DMA_HandleTypeDef hdma_dac1;
 
-I2C_HandleTypeDef hi2c1;
-I2C_HandleTypeDef hi2c2;
+ETH_HandleTypeDef heth;
 
-SPI_HandleTypeDef hspi1;
+I2C_HandleTypeDef hi2c2;
 
 TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart3;
 
+PCD_HandleTypeDef hpcd_USB_OTG_FS;
+
 /* USER CODE BEGIN PV */
-// #define DAC_BUFFER_SIZE 192000
 
-static uint8_t packet_buffer[4][64];
-static uint16_t packet_lengths[4];
-
-// static uint16_t dac_buffer[DAC_BUFFER_SIZE];
-
-static uint16_t seq_id = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -84,152 +84,18 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_DAC_Init(void);
-static void MX_I2C1_Init(void);
-static void MX_I2C2_Init(void);
-static void MX_SPI1_Init(void);
+static void MX_ETH_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_USB_OTG_FS_PCD_Init(void);
+static void MX_I2C2_Init(void);
 /* USER CODE BEGIN PFP */
-static void Execute_TransmitSequence(uint64_t timestamp, uint32_t timestamp_high, uint32_t timestamp_low);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int _write(int file , char *ptr , int len)
-{
-  HAL_UART_Transmit(&huart3 , (uint8_t *)ptr , len , HAL_MAX_DELAY);
-  return len;
-} // end function _write
 
-void DAC_Play(uint16_t *buffer , uint32_t sample_len)
-{
-  printf("DAC_Play sample_len = %lu\r\n" , sample_len);
-
-  if (sample_len == 0)
-  {
-    printf("DAC sample_len is 0, skip DAC play\r\n");
-    LED_GreenOnly();
-    // Relay_Off;
-    return;
-  } // end if no sample
-
-  LED_RedOnly();
-
-  HAL_TIM_Base_Start(&htim6);
-
-  HAL_StatusTypeDef ret;
-
-  ret = HAL_DAC_Start_DMA(&hdac , DAC_CHANNEL_1 , (uint32_t *)buffer , sample_len , DAC_ALIGN_12B_R);
-
-  printf("HAL_DAC_Start_DMA ret = %d\r\n" , ret);
-
-  if (ret != HAL_OK)
-  {
-    printf("DAC DMA start failed\r\n");
-    HAL_TIM_Base_Stop(&htim6);
-    LED_GreenOnly();
-    return;
-  } // end if
-
-  while (HAL_DAC_GetState(&hdac) != HAL_DAC_STATE_READY)
-  {
-    // wait for DAC DMA complete
-  } // end while
-  
-  HAL_DAC_Stop_DMA(&hdac , DAC_CHANNEL_1);
-  HAL_TIM_Base_Stop(&htim6);
-} // end function DAC_Play
-
-static void Execute_TransmitSequence(uint64_t timestamp, uint32_t timestamp_high, uint32_t timestamp_low)
-{
-  IMU_Avg_t avg = AvgBuffer_GetAverage();
-  const uint16_t avg_count = AvgBuffer_GetCount();
-
-  LED_BlueOnly();
-  Relay_On();
-
-  // delay for stable Relay
-  HAL_Delay(1000);
-
-  printf("#########################################################\r\n");
-  printf("Scheduled transmit triggered. Count=%u\r\n" , (unsigned int)avg_count);
-
-  // only build package
-  for (uint8_t pair = 1U; pair <= 4U; pair++)
-  {
-    const uint8_t pair_index = pair - 1U;
-    
-    packet_lengths[pair_index] = Packet_Build(packet_buffer[pair_index], pair, seq_id, timestamp, avg);
-
-    printf("Pair %u built, len=%u\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index]);
-  } // end for
-
-  // write in SD card
-  uint8_t log_success = 1U;
-
-  for (uint8_t pair = 1U; pair <= 4U; pair++)
-  {
-    const uint8_t pair_index = pair - 1U;
-
-    FRESULT log_result = SD_LogTxPacket(timestamp, seq_id, pair, packet_buffer[pair_index], packet_lengths[pair_index]);
-
-    if (log_result != FR_OK)
-    {
-      printf("Pair %u TX log failed. res=%d\r\n", (unsigned int)pair, log_result);
-
-      log_success = 0U;
-      break;
-    } // end if
-
-    printf("Pair %u ready, len=%u,timestamp=%lu%09lu\r\n", (unsigned int)pair, (unsigned int)packet_lengths[pair_index], (unsigned long)timestamp_high, (unsigned long)timestamp_low);
-  } // end for
-
-  if (log_success == 0U)
-  {
-    Relay_Off();
-    LED_GreenOnly();
-
-    printf("Transmit cancelled because TX log failed.\r\n");
-    printf("#########################################################\r\n");
-  } // end if
-
-  LED_RedOnly();
-  HAL_StatusTypeDef stream_status = DAC_Stream_StartSequence(packet_buffer, packet_lengths);
-
-  printf("DAC stream ret=%d\r\n", stream_status);
-
-  if (stream_status == HAL_OK)
-  {
-    while ((DAC_Stream_IsFinished() == 0U) && (DAC_Stream_HasError() == 0U))
-    {
-      DAC_Stream_Process();
-    } // end while
-    
-    DAC_Stream_Stop();
-
-    if (DAC_Stream_HasError() != 0U)
-    {
-      printf("DAC stream error.\r\n");
-    } // end if
-    else
-    {
-      printf("DAC stream completed.\r\n");
-
-      seq_id++;
-      AvgBuffer_Clear();
-    } // end else
-  }
-  else
-  {
-    printf("DAC stream start failed.\r\n");
-  } // end else
-
-  HAL_Delay(1000);
-  Relay_Off();
-  LED_GreenOnly();
-
-  printf("#########################################################\r\n");
-} // end function Excute_TransmitSequence
 /* USER CODE END 0 */
 
 /**
@@ -266,57 +132,13 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_DAC_Init();
-  MX_I2C1_Init();
-  MX_I2C2_Init();
-  MX_SPI1_Init();
+  MX_ETH_Init();
   MX_TIM6_Init();
-  MX_FATFS_Init();
   MX_USART3_UART_Init();
+  MX_USB_OTG_FS_PCD_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_Delay(1000);
-  LED_AllOff();
-  Relay_Off();
 
-  printf("System boot...\r\n");
-
-  if (MPU6050_Init(&hi2c1) != HAL_OK)
-  {
-    printf("MPU6050 init failed.\r\n");
-  } // end if mpu6050 not ok
-  else
-  {
-    printf("MPU6050 init OK.\r\n");
-  } // end else
-
-  if (SD_Logger_Init() != FR_OK)
-  {
-    printf("SD init failed.\r\n");
-  } // end if SD card not ok
-  else
-  {
-    printf("SD init OK.\r\n");
-  } // end else
-
-  printf("Building DAC symbol cache...\r\n");
-  DAC_Stream_Init();
-  printf("DAC symbol cache ready.\r\n");
-
-  LED_GreenOnly();    // Standby state
-
-// avoid dac output once we boot
-uint32_t boot_tick = HAL_GetTick();
-
-
-  printf("System ready.\r\n");
-  DS3231_Time_t now = {0};
-
-  if (DS3231_GetTime(&hi2c2, &now) != HAL_OK)
-  {
-    printf("Initial DS3231 read failed.\r\n");
-  } // end if unable to read time
-
-  uint8_t last_minute = now.minute;
-  uint8_t last_second = now.second;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -326,60 +148,7 @@ uint32_t boot_tick = HAL_GetTick();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    
-    if (DS3231_GetTime(&hi2c2 , &now) == HAL_OK)
-    {
-      // switch period 
-      // if (now.minute != last_minute)
-      if (now.second != last_second)
-      {
-        last_second = now.second;
-
-        LED_GreenOnly();
-
-        IMU_Raw_t imu;
-
-        if (MPU6050_ReadRaw(&hi2c1 , &imu) == HAL_OK)
-        {
-          uint64_t timestamp = DS3231_ToSimpleTimestamp(&now);
-
-          SD_LogRaw(timestamp , imu);
-
-          AvgBuffer_Add(imu);
-
-          // printf("Count=%u\r\n", (unsigned int)AvgBuffer_GetCount());
-          // printf("ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n", imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
-
-          uint32_t timestamp_high = timestamp / 1000000000ULL;
-          uint32_t timestamp_low = timestamp % 1000000000ULL;
-
-          // printf("Time=%lu%09lu\r\n" ,timestamp_high , timestamp_low);
-
-          printf("RAW saved. Time=%lu%09lu, Count=%u, ACC=%.2f,%.2f,%.2f, GYRO=%.2f,%.2f,%.2f\r\n",
-            timestamp_high , timestamp_low , (unsigned int)AvgBuffer_GetCount() , imu.acc_x , imu.acc_y , imu.acc_z , imu.gyro_x , imu.gyro_y , imu.gyro_z);
-
-          // if ((now.minute == 0) && (AvgBuffer_GetCount() > 0))
-          if ((now.minute != last_minute) && (AvgBuffer_GetCount() > 0U) && (HAL_GetTick() - boot_tick >= 60000U) && (now.second == 0U))
-          {
-            last_minute = now.minute;
-            
-            Execute_TransmitSequence(timestamp, timestamp_high, timestamp_low);
-          } // end scheduled mission
-
-        } // end if able to read MPU6050
-        else
-        {
-          printf("MPU6050 read failed.\r\n");
-        } // end else
-      } // end if reach trigger time
-    } // end if DS3231 able to get time
-    else
-    {
-      printf("DS3231 read failed.\r\n");
-    } // end else
-
-    HAL_Delay(100);
-  } // end while
+  }
   /* USER CODE END 3 */
 }
 
@@ -391,6 +160,10 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure LSE Drive Capability
+  */
+  HAL_PWR_EnableBkUpAccess();
 
   /** Configure the main internal regulator output voltage
   */
@@ -404,10 +177,10 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 432;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 216;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 9;
   RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -477,50 +250,51 @@ static void MX_DAC_Init(void)
 }
 
 /**
-  * @brief I2C1 Initialization Function
+  * @brief ETH Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void)
+static void MX_ETH_Init(void)
 {
 
-  /* USER CODE BEGIN I2C1_Init 0 */
+  /* USER CODE BEGIN ETH_Init 0 */
 
-  /* USER CODE END I2C1_Init 0 */
+  /* USER CODE END ETH_Init 0 */
 
-  /* USER CODE BEGIN I2C1_Init 1 */
+   static uint8_t MACAddr[6];
 
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x20404768;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  /* USER CODE BEGIN ETH_Init 1 */
+
+  /* USER CODE END ETH_Init 1 */
+  heth.Instance = ETH;
+  MACAddr[0] = 0x00;
+  MACAddr[1] = 0x80;
+  MACAddr[2] = 0xE1;
+  MACAddr[3] = 0x00;
+  MACAddr[4] = 0x00;
+  MACAddr[5] = 0x00;
+  heth.Init.MACAddr = &MACAddr[0];
+  heth.Init.MediaInterface = HAL_ETH_RMII_MODE;
+  heth.Init.TxDesc = DMATxDscrTab;
+  heth.Init.RxDesc = DMARxDscrTab;
+  heth.Init.RxBuffLen = 1524;
+
+  /* USER CODE BEGIN MACADDRESS */
+
+  /* USER CODE END MACADDRESS */
+
+  if (HAL_ETH_Init(&heth) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
+  memset(&TxConfig, 0 , sizeof(ETH_TxPacketConfig));
+  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
+  TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
+  TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
+  /* USER CODE BEGIN ETH_Init 2 */
 
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
+  /* USER CODE END ETH_Init 2 */
 
 }
 
@@ -573,46 +347,6 @@ static void MX_I2C2_Init(void)
 }
 
 /**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 7;
-  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
   * @brief TIM6 Initialization Function
   * @param None
   * @retval None
@@ -632,7 +366,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 561;
+  htim6.Init.Period = 65535;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -686,6 +420,41 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
+  * @brief USB_OTG_FS Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USB_OTG_FS_PCD_Init(void)
+{
+
+  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
+
+  /* USER CODE END USB_OTG_FS_Init 0 */
+
+  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
+
+  /* USER CODE END USB_OTG_FS_Init 1 */
+  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
+  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
+  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
+  hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
+  hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
+  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
+  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
+  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
+
+  /* USER CODE END USB_OTG_FS_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -714,42 +483,45 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_14|GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PC0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : USER_Btn_Pin */
+  GPIO_InitStruct.Pin = USER_Btn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB14 PB7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_14|GPIO_PIN_7;
+  /*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
+  GPIO_InitStruct.Pin = LD1_Pin|LD3_Pin|LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SD_CS_Pin */
-  GPIO_InitStruct.Pin = SD_CS_Pin;
+  /*Configure GPIO pin : USB_PowerSwitchOn_Pin */
+  GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : USB_OverCurrent_Pin */
+  GPIO_InitStruct.Pin = USB_OverCurrent_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
