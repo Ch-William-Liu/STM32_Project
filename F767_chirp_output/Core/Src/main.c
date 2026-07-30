@@ -23,7 +23,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "chirp_output.h"
+#include "ds3231.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -138,13 +140,44 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
+  ChirpPlayer_Init(&hdac, &htim6);
 
+  DS3231_Time_t now = {0};
+  uint8_t second_zero_handle = 0U;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    ChirpPlayer_Process();
+
+    if (DS3231_GetTime(&hi2c2, &now) == HAL_OK)
+    {
+      if ((now.second == 0U) && (second_zero_handle == 0U))
+      {
+        second_zero_handle = 1U;
+
+        if (ChirpPlayer_IsRunning() == 0U)
+        {
+          HAL_StatusTypeDef status = ChirpPlayer_Play();
+
+          if (status == HAL_OK)
+          {
+            printf("chirp started: %02u:%02u:%02u\r\n", now.hour, now.minute, now.second);
+          } // end if
+          else
+          {
+            printf("Chirp start failed: %d\r\n", status);
+          } // end else
+        } // end if
+      } // end if
+
+      if (now.second != 0U)
+      {
+        second_zero_handle = 0U;
+      } // end if
+    } // end if
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
