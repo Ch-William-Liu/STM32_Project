@@ -2,7 +2,7 @@
 #include "crc16.h"
 #include "string.h"
 
-uint16_t Packet_Build(uint8_t *packet , uint8_t freq_pair , uint8_t seq_id , uint64_t timestamp , IMU_Avg_t avg)
+uint16_t Packet_Build(uint8_t *packet , uint8_t freq_pair , uint16_t seq_id , uint64_t timestamp , IMU_Avg_t avg)
 {
     uint16_t idx = 0;
 
