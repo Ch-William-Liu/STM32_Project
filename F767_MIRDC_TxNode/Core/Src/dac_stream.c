@@ -358,6 +358,8 @@ static void FillStreamBuffer(uint32_t offset, uint32_t length)
   {
     stream_buffer[offset + i] = GenerateNextSample();
   } // end for
+
+  SCB_CleanDCache_by_Addr((uint32_t *)&stream_buffer[offset], (int32_t)(length * sizeof(stream_buffer[0])));
 } // end function static void FillStreamBuffer
 
 HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE], const uint16_t packet_lengths[DAC_STREAM_PAIR_COUNT])
