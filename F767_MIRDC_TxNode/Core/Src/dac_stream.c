@@ -43,6 +43,7 @@ static volatile uint8_t fill_second_half_request = 0U;
 static volatile uint8_t stream_running = 0U;
 static volatile uint8_t stream_finished = 0U;
 static volatile uint8_t stream_error = 0U;
+static volatile uint32_t stream_underrun_count = 0U;
 
 static uint8_t stream_packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE];
 
@@ -64,6 +65,19 @@ static uint32_t state_sample_index = 0U;
 static uint8_t sync_chirp_count = 0U;
 static uint8_t current_pair_index = 0U;
 static volatile uint8_t drain_callback_count = 0U;
+
+/* Runtime sync-chirp oscillator states.  These replace per-sample sinf/cosf
+ * calls, which are too slow to refill a 192 kHz circular-DMA buffer in time. */
+static float sync_sig_cos = 1.0f;
+static float sync_sig_sin = 0.0f;
+static float sync_step_cos = 1.0f;
+static float sync_step_sin = 0.0f;
+static float sync_step_delta_cos = 1.0f;
+static float sync_step_delta_sin = 0.0f;
+static float sync_win_cos = 1.0f;
+static float sync_win_sin = 0.0f;
+static float sync_win_step_cos = 1.0f;
+static float sync_win_step_sin = 0.0f;
 
 /* 
 Frequency table
@@ -120,6 +134,35 @@ static uint32_t GetSyncChirpSamples(void)
   return (uint32_t)(DAC_FS * SYNC_CHIRP_DURATION + 0.5f);
 } // end function GetSyncChirpSamples
 
+static void SyncGenerator_Reset(void)
+{
+  const uint32_t total_samples = GetSyncChirpSamples();
+  const float chirp_rate =
+      (SYNC_CHIRP_END_FREQ - SYNC_CHIRP_START_FREQ) /
+      SYNC_CHIRP_DURATION;
+
+  /* Exact discrete-time phase increment from sample n to n+1:
+   * 2*pi*(f0/fs + k*(n+0.5)/fs^2). */
+  const float first_step = 2.0f * PI *
+      (SYNC_CHIRP_START_FREQ / DAC_FS
+       + 0.5f * chirp_rate / (DAC_FS * DAC_FS));
+  const float step_delta =
+      2.0f * PI * chirp_rate / (DAC_FS * DAC_FS);
+  const float window_step =
+      2.0f * PI / (float)(total_samples - 1U);
+
+  sync_sig_cos = 1.0f;
+  sync_sig_sin = 0.0f;
+  sync_step_cos = cosf(first_step);
+  sync_step_sin = sinf(first_step);
+  sync_step_delta_cos = cosf(step_delta);
+  sync_step_delta_sin = sinf(step_delta);
+  sync_win_cos = 1.0f;
+  sync_win_sin = 0.0f;
+  sync_win_step_cos = cosf(window_step);
+  sync_win_step_sin = sinf(window_step);
+} // end function SyncGenerator_Reset
+
 static uint16_t GenerateSyncChirpSample(uint32_t n)
 {
   const uint32_t total_samples = GetSyncChirpSamples();
@@ -129,13 +172,64 @@ static uint16_t GenerateSyncChirpSample(uint32_t n)
     return DAC_MID;
   } // end if total sample too big or idx 
 
-  const float t = (float)n / DAC_FS;
+  const float window = 0.5f * (1.0f - sync_win_cos);
+  const uint16_t sample = FloatToDAC(sync_sig_sin * window);
 
-  const float chirp_rate = (SYNC_CHIRP_END_FREQ - SYNC_CHIRP_START_FREQ) / SYNC_CHIRP_DURATION;
-  const float phase = 2.0f * PI * (SYNC_CHIRP_START_FREQ * t + 0.5f * chirp_rate * t * t);
-  const float window = 0.5f * (1.0f - cosf(2.0f * PI * (float)n / (float)(total_samples - 1U)));
+  /* signal_oscillator *= instantaneous_phase_step */
+  const float next_sig_cos =
+      sync_sig_cos * sync_step_cos - sync_sig_sin * sync_step_sin;
+  const float next_sig_sin =
+      sync_sig_sin * sync_step_cos + sync_sig_cos * sync_step_sin;
+  sync_sig_cos = next_sig_cos;
+  sync_sig_sin = next_sig_sin;
 
-  return FloatToDAC(sinf(phase) * window);
+  /* instantaneous_phase_step *= constant_chirp_step_delta */
+  const float next_step_cos =
+      sync_step_cos * sync_step_delta_cos
+      - sync_step_sin * sync_step_delta_sin;
+  const float next_step_sin =
+      sync_step_sin * sync_step_delta_cos
+      + sync_step_cos * sync_step_delta_sin;
+  sync_step_cos = next_step_cos;
+  sync_step_sin = next_step_sin;
+
+  /* Hann-window oscillator uses a constant angular step. */
+  const float next_win_cos =
+      sync_win_cos * sync_win_step_cos
+      - sync_win_sin * sync_win_step_sin;
+  const float next_win_sin =
+      sync_win_sin * sync_win_step_cos
+      + sync_win_cos * sync_win_step_sin;
+  sync_win_cos = next_win_cos;
+  sync_win_sin = next_win_sin;
+
+  /* Limit accumulated float roundoff with one inexpensive normalization per
+   * 2048 samples, rather than two trigonometric calls on every sample. */
+  if ((n & 0x07FFU) == 0x07FFU)
+  {
+    float norm = sqrtf(sync_sig_cos * sync_sig_cos + sync_sig_sin * sync_sig_sin);
+    if (norm > 0.0f)
+    {
+      sync_sig_cos /= norm;
+      sync_sig_sin /= norm;
+    }
+
+    norm = sqrtf(sync_step_cos * sync_step_cos + sync_step_sin * sync_step_sin);
+    if (norm > 0.0f)
+    {
+      sync_step_cos /= norm;
+      sync_step_sin /= norm;
+    }
+
+    norm = sqrtf(sync_win_cos * sync_win_cos + sync_win_sin * sync_win_sin);
+    if (norm > 0.0f)
+    {
+      sync_win_cos /= norm;
+      sync_win_sin /= norm;
+    }
+  }
+
+  return sample;
 } // end function GenerateSyncChirpSample
 
 static void BuildSymbolCacheEntry(uint8_t pair_index, uint8_t symbol)
@@ -249,6 +343,10 @@ static void AdvanceStateIfNeeded(void)
         {
           stream_state = DAC_STREAM_STATE_POST_SYNC_SILENCE;
         } // end if
+        else
+        {
+          SyncGenerator_Reset();
+        }
       } // end if
       break;
     } // end case DAC_STREAM_STATE_SYNC_CHIRP
@@ -359,7 +457,12 @@ static void FillStreamBuffer(uint32_t offset, uint32_t length)
     stream_buffer[offset + i] = GenerateNextSample();
   } // end for
 
-  SCB_CleanDCache_by_Addr((uint32_t *)&stream_buffer[offset], (int32_t)(length * sizeof(stream_buffer[0])));
+  /* STM32F767 DMA does not snoop the Cortex-M7 data cache.  Clean the
+   * refilled half-buffer so the DAC sees the new samples instead of replaying
+   * stale data from an earlier circular-DMA cycle. */
+  SCB_CleanDCache_by_Addr(
+      (uint32_t *)&stream_buffer[offset],
+      (int32_t)(length * sizeof(stream_buffer[0])));
 } // end function static void FillStreamBuffer
 
 HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR_COUNT][DAC_STREAM_MAX_PACKET_SIZE], const uint16_t packet_lengths[DAC_STREAM_PAIR_COUNT])
@@ -392,6 +495,7 @@ HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR
   fill_second_half_request = 0U;
 
   stream_error = 0U;
+  stream_underrun_count = 0U;
   stream_finished = 0U;
   stream_running = 0U;
 
@@ -401,6 +505,7 @@ HAL_StatusTypeDef DAC_Stream_StartSequence(const uint8_t packets[DAC_STREAM_PAIR
   drain_callback_count = 0U;
 
   stream_state = DAC_STREAM_STATE_SYNC_CHIRP;
+  SyncGenerator_Reset();
 
   FillStreamBuffer(0U, DAC_STREAM_HALF_SIZE);
   FillStreamBuffer(DAC_STREAM_HALF_SIZE, DAC_STREAM_HALF_SIZE);
@@ -506,6 +611,11 @@ void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
       return;
   } // end if
 
+  if (fill_first_half_request != 0U)
+  {
+    stream_underrun_count++;
+    stream_error = 1U;
+  }
   fill_first_half_request = 1U;
   HandleDrainCallback();
 } // end function HAL_DAC_ConvHalfCpltCallbackCh1
@@ -517,6 +627,11 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
       return;
   } // end if 
 
+  if (fill_second_half_request != 0U)
+  {
+    stream_underrun_count++;
+    stream_error = 1U;
+  }
   fill_second_half_request = 1U;
   HandleDrainCallback();
 } // end function HAL_DAC_ConvCpltCallbackCh1

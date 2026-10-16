@@ -97,7 +97,15 @@ static void MX_I2C2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int __io_putchar(int ch)
+{
+    HAL_UART_Transmit(&huart3,
+                      (uint8_t *)&ch,
+                      1,
+                      HAL_MAX_DELAY);
 
+    return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -142,8 +150,14 @@ int main(void)
   /* USER CODE BEGIN 2 */
   ChirpPlayer_Init(&hdac, &htim6);
 
+  if (ChirpPlayer_StartIdleStream() != HAL_OK)
+  {
+    printf("Idle stream start failed.\r\n");
+  } // end if
+
   DS3231_Time_t now = {0};
   uint8_t second_zero_handle = 0U;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -158,19 +172,23 @@ int main(void)
       {
         second_zero_handle = 1U;
 
-        if (ChirpPlayer_IsRunning() == 0U)
-        {
-          HAL_StatusTypeDef status = ChirpPlayer_Play();
+        HAL_StatusTypeDef status = ChirpPlayer_Play();
 
-          if (status == HAL_OK)
-          {
-            printf("chirp started: %02u:%02u:%02u\r\n", now.hour, now.minute, now.second);
-          } // end if
-          else
-          {
-            printf("Chirp start failed: %d\r\n", status);
-          } // end else
+        if (status == HAL_OK)
+        {
+          printf("Chirp started: %02u:%02u:%02u\r\n",
+            now.hour,
+            now.minute,
+            now.second);
         } // end if
+        else if (status == HAL_BUSY)
+        {
+          printf("Chirp already active,\r\n");
+        } // end else if
+        else
+        {
+          printf("Chirp start failed: %d\r\n", (int)status);
+        } // end else
       } // end if
 
       if (now.second != 0U)
@@ -399,7 +417,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 1079;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {

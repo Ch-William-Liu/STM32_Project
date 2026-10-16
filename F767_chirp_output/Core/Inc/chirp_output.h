@@ -17,7 +17,7 @@
  * At 96 kHz, each half is 5.333 ms and 192000 samples is exactly
  * divisible by 512, allowing the stream to stop at exactly 2 s.
  */
-#define CHIRP_STREAM_BUFFER_SIZE    1024U
+#define CHIRP_STREAM_BUFFER_SIZE    16384U
 #define CHIRP_STREAM_HALF_SIZE      (CHIRP_STREAM_BUFFER_SIZE / 2U)
 
 void ChirpPlayer_Init(DAC_HandleTypeDef *dac_handle,

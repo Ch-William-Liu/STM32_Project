@@ -7,6 +7,14 @@
 #define PI_F                        3.14159265358979323846f
 #define CHIRP_TOTAL_SAMPLES         ((uint32_t)(CHIRP_DAC_FS_HZ * CHIRP_DURATION_SEC + 0.5f))
 
+#define PRE_SILENCE_MS              500U
+#define POST_SILENCE_MS             500U
+
+#define PRE_SILENCE_SAMPLES         (CHIRP_DAC_FS_HZ * PRE_SILENCE_MS) / 1000U
+#define POST_SILENCE_SAMPLES        (CHIRP_DAC_FS_HZ * POST_SILENCE_MS) / 1000U
+
+#define STREAM_TOTAL_SAMPLES        (PRE_SILENCE_SAMPLES + CHIRP_TOTAL_SAMPLES + POST_SILENCE_SAMPLES)
+
 #if defined(__GNUC__)
 __attribute__((aligned(32)))
 #endif
@@ -20,9 +28,8 @@ static volatile uint8_t fill_second_half_request = 0U;
 static volatile uint8_t stream_running = 0U;
 static volatile uint8_t stream_finished = 0U;
 static volatile uint8_t stream_error = 0U;
-
-static uint32_t generated_sample_count = 0U;
-static volatile uint32_t played_sample_count = 0U;
+static volatile uint8_t chirp_active = 0U;
+static uint32_t output_sample_count = 0U;
 
 static uint16_t FloatToDAC(float signal)
 {
@@ -61,27 +68,117 @@ static uint16_t GenerateChirpSample(uint32_t n)
   return FloatToDAC(sinf(phase) * window);
 }
 
+static uint16_t GenerateOutputSample(uint32_t n)
+{
+  if (n < PRE_SILENCE_SAMPLES)
+  {
+    return (uint16_t)CHIRP_DAC_MID;
+  } // end if in pre silence
+
+  if (n < (PRE_SILENCE_SAMPLES + CHIRP_TOTAL_SAMPLES))
+  {
+    uint32_t chirp_index = n - PRE_SILENCE_SAMPLES;
+
+    return GenerateChirpSample(chirp_index);
+  } // end if in signal
+
+  return (uint16_t)CHIRP_DAC_MID;
+} // end function GenerateOutputSample
+
 static void FillStreamBuffer(uint32_t offset, uint32_t length)
 {
-  if ((offset + length) > CHIRP_STREAM_BUFFER_SIZE)
+  if ((offset + length) >
+      CHIRP_STREAM_BUFFER_SIZE)
   {
-    stream_error = 1U;
-    return;
+      stream_error = 1U;
+      return;
   }
 
   for (uint32_t i = 0U; i < length; i++)
   {
-    if (generated_sample_count < CHIRP_TOTAL_SAMPLES)
-    {
-      stream_buffer[offset + i] = GenerateChirpSample(generated_sample_count);
-      generated_sample_count++;
-    }
-    else
-    {
-      stream_buffer[offset + i] = (uint16_t)CHIRP_DAC_MID;
-    }
+      if (chirp_active != 0U)
+      {
+          if (output_sample_count <
+              STREAM_TOTAL_SAMPLES)
+          {
+              stream_buffer[offset + i] =
+                  GenerateOutputSample(
+                      output_sample_count);
+
+              output_sample_count++;
+          }
+          else
+          {
+              stream_buffer[offset + i] =
+                  (uint16_t)CHIRP_DAC_MID;
+
+              chirp_active = 0U;
+              stream_finished = 1U;
+          }
+      }
+      else
+      {
+          stream_buffer[offset + i] =
+              (uint16_t)CHIRP_DAC_MID;
+      }
   }
+
+  SCB_CleanDCache_by_Addr(
+      (uint32_t *)&stream_buffer[offset],
+      (int32_t)(length *
+                sizeof(stream_buffer[0])));
 }
+
+HAL_StatusTypeDef ChirpPlayer_StartIdleStream(void)
+{
+  HAL_StatusTypeDef status;
+
+  if ((player_hdac == NULL) || (player_htim == NULL))
+  {
+    stream_error = 1U;
+    return HAL_ERROR;
+  } // end if
+
+  for (uint32_t i = 0U; i < CHIRP_STREAM_BUFFER_SIZE; i++)
+  {
+    stream_buffer[i] = (uint16_t)CHIRP_DAC_MID;
+  } // end for
+
+  fill_first_half_request = 0U;
+  fill_second_half_request = 0U;
+
+  stream_running = 1U;
+  chirp_active = 0U;
+
+  SCB_CleanDCache_by_Addr(
+    (uint32_t *)stream_buffer,
+    (int32_t)sizeof(stream_buffer));
+
+  status = HAL_DAC_Start_DMA(player_hdac, DAC_CHANNEL_1, (uint32_t *)stream_buffer, CHIRP_STREAM_BUFFER_SIZE, DAC_ALIGN_12B_R);
+
+  if (status != HAL_OK)
+  {
+    stream_error = 1U;
+    stream_running = 0U;
+    return status;
+  } // end if 
+
+  __HAL_TIM_SET_COUNTER(player_htim , 0U);
+
+  status = HAL_TIM_Base_Start(player_htim);
+
+  if (status != HAL_OK)
+  {
+    (void)HAL_DAC_Stop_DMA(player_hdac, DAC_CHANNEL_1);
+
+    stream_error = 1U;
+    stream_running = 0U;
+
+    return status;
+  } // end if
+
+  return HAL_OK;
+} // end function ChirpPlayer_StartIdleStream
 
 void ChirpPlayer_Init(DAC_HandleTypeDef *dac_handle,
                       TIM_HandleTypeDef *tim_handle)
@@ -95,8 +192,6 @@ void ChirpPlayer_Init(DAC_HandleTypeDef *dac_handle,
   stream_finished = 0U;
   stream_error = ((dac_handle == NULL) || (tim_handle == NULL)) ? 1U : 0U;
 
-  generated_sample_count = 0U;
-  played_sample_count = 0U;
 
   for (uint32_t i = 0U; i < CHIRP_STREAM_BUFFER_SIZE; i++)
   {
@@ -106,56 +201,32 @@ void ChirpPlayer_Init(DAC_HandleTypeDef *dac_handle,
 
 HAL_StatusTypeDef ChirpPlayer_Play(void)
 {
-  if ((player_hdac == NULL) || (player_htim == NULL))
+  if ((player_hdac == NULL) ||
+  (player_htim == NULL))
   {
     stream_error = 1U;
     return HAL_ERROR;
   }
 
-  if (stream_running != 0U)
+  if (stream_running == 0U)
+  {
+    return HAL_ERROR;
+  }
+
+  if (chirp_active != 0U)
   {
     return HAL_BUSY;
   }
-
-  fill_first_half_request = 0U;
-  fill_second_half_request = 0U;
-  stream_running = 0U;
-  stream_finished = 0U;
-  stream_error = 0U;
-  generated_sample_count = 0U;
-  played_sample_count = 0U;
-
-  FillStreamBuffer(0U, CHIRP_STREAM_HALF_SIZE);
-  FillStreamBuffer(CHIRP_STREAM_HALF_SIZE, CHIRP_STREAM_HALF_SIZE);
 
   if (stream_error != 0U)
   {
     return HAL_ERROR;
   }
 
-  HAL_StatusTypeDef status = HAL_DAC_Start_DMA(
-      player_hdac,
-      DAC_CHANNEL_1,
-      (uint32_t *)stream_buffer,
-      CHIRP_STREAM_BUFFER_SIZE,
-      DAC_ALIGN_12B_R);
+  output_sample_count = 0U;
+  stream_finished = 0U;
+  chirp_active = 1U;
 
-  if (status != HAL_OK)
-  {
-    stream_error = 1U;
-    return status;
-  }
-
-  status = HAL_TIM_Base_Start(player_htim);
-
-  if (status != HAL_OK)
-  {
-    (void)HAL_DAC_Stop_DMA(player_hdac, DAC_CHANNEL_1);
-    stream_error = 1U;
-    return status;
-  }
-
-  stream_running = 1U;
   return HAL_OK;
 }
 
@@ -175,17 +246,13 @@ void ChirpPlayer_Process(void)
   if (fill_second_half_request != 0U)
   {
     fill_second_half_request = 0U;
-    FillStreamBuffer(CHIRP_STREAM_HALF_SIZE, CHIRP_STREAM_HALF_SIZE);
+    FillStreamBuffer(CHIRP_STREAM_HALF_SIZE,
+                     CHIRP_STREAM_HALF_SIZE);
   }
 
-  if ((played_sample_count >= CHIRP_TOTAL_SAMPLES) || (stream_error != 0U))
+  if (stream_error != 0U)
   {
     ChirpPlayer_Stop();
-
-    if (stream_error == 0U)
-    {
-      stream_finished = 1U;
-    }
   }
 }
 
@@ -221,29 +288,31 @@ uint8_t ChirpPlayer_HasError(void)
   return stream_error;
 }
 
-void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
+void HAL_DAC_ConvHalfCpltCallbackCh1(
+  DAC_HandleTypeDef *hdac_handle)
 {
-  if ((hdac_handle == NULL) || (player_hdac == NULL) ||
+  if ((hdac_handle == NULL) ||
+      (player_hdac == NULL) ||
       (hdac_handle->Instance != player_hdac->Instance) ||
       (stream_running == 0U))
   {
     return;
   }
 
-  played_sample_count += CHIRP_STREAM_HALF_SIZE;
   fill_first_half_request = 1U;
 }
 
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle)
+void HAL_DAC_ConvCpltCallbackCh1(
+  DAC_HandleTypeDef *hdac_handle)
 {
-  if ((hdac_handle == NULL) || (player_hdac == NULL) ||
+  if ((hdac_handle == NULL) ||
+      (player_hdac == NULL) ||
       (hdac_handle->Instance != player_hdac->Instance) ||
       (stream_running == 0U))
   {
     return;
   }
 
-  played_sample_count += CHIRP_STREAM_HALF_SIZE;
   fill_second_half_request = 1U;
 }
 
