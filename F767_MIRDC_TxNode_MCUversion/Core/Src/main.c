@@ -136,7 +136,7 @@ int main(void)
 
   char msg[128];
 
-  snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
+  snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
 
   HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 1000);
 
