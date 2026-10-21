@@ -139,7 +139,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    HAL_GPIO_TogglePin(LED_PG0_Port, LED_PG0_Pin);
+    HAL_GPIO_TogglePin(LED_PG0_GPIO_Port, LED_PG0_Pin);
 
     const char test_msg[] = "System Running\r\n";
 
