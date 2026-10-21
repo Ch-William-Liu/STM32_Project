@@ -134,18 +134,11 @@ int main(void)
 
   rtc_status = HAL_I2C_IsDeviceReady(&hi2c2, (0x68 << 1), 3, 100);
 
-  if (rtc_status == HAL_OK)
-  {
-    const char msg[] = "[RTC] DS3231 detected\r\n";
+  char msg[128];
 
-    HAL_UART_Transmit(&huart3, (uint8_t *)msg, sizeof(msg) - 1, 1000);
-  } // end if rtc_status ok
-  else
-  {
-    const char msg[] = "[RTC] DS3231 not detected\r\n";
+  snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
 
-    HAL_UART_Transmit(&huart3, (uint8_t *)msg, sizeof(msg) - 1, 1000);
-  } // end else 
+  HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 1000);
 
   /* USER CODE END 2 */
 
