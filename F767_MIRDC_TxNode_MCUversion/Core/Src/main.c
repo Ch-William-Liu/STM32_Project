@@ -399,35 +399,82 @@ int main(void)
 
 
     // battery status
-    uint16_t stack_raw = 0;
-    uint16_t pack_raw = 0;
-    uint16_t current_raw = 0;
-    uint16_t safty_raw = 0;
+    // ===== START: BQ76942 Battery Status Read =====
 
-    HAL_StatusTypeDef s1 = BQ76942_Read16(0x34, &stack_raw);
-    HAL_StatusTypeDef s2 = BQ76942_Read16(0x36, &pack_raw);
-    HAL_StatusTypeDef s3 = BQ76942_Read16(0x3A, &current_raw);
-    HAL_StatusTypeDef s4 = BQ76942_Read16(0x03, &safty_raw);
+    uint8_t stack_data[2] = {0};
+    uint8_t pack_data[2] = {0};
+    uint8_t current_data[2] = {0};
+    uint8_t safety_a = 0;
 
-    char bg_val_msg[256];
+    HAL_StatusTypeDef s_stack =
+        BQ76942_ReadCRC(0x34, stack_data, 2);
 
-    if (s1 == HAL_OK && s2 == HAL_OK && s3== HAL_OK && s4 == HAL_OK)
+    HAL_StatusTypeDef s_pack =
+        BQ76942_ReadCRC(0x36, pack_data, 2);
+
+    HAL_StatusTypeDef s_current =
+        BQ76942_ReadCRC(0x3A, current_data, 2);
+
+    HAL_StatusTypeDef s_safety =
+        BQ76942_ReadCRC(0x03, &safety_a, 1);
+
+    char bq_status_msg[200];
+
+    if (s_stack == HAL_OK &&
+        s_pack == HAL_OK &&
+        s_current == HAL_OK &&
+        s_safety == HAL_OK)
     {
-      float stack_voltage = stack_raw * 0.01f;
-      float pack_voltage = pack_raw * 0.01f;
-      int16_t current = (int16_t)current_raw;
+        uint16_t stack_raw =
+            (uint16_t)stack_data[0] |
+            ((uint16_t)stack_data[1] << 8);
 
-      snprintf(bg_val_msg, sizeof(bg_val_msg), "[BQ76942] Stack=%.2f V, Pack=%.2f V, Current=%.2d mA, SaftyA=0x%04X\r\n", stack_voltage, pack_voltage, (int)current, (unsigned long)safty_raw);
+        uint16_t pack_raw =
+            (uint16_t)pack_data[0] |
+            ((uint16_t)pack_data[1] << 8);
 
-      HAL_UART_Transmit(&huart3, (uint8_t *)bg_val_msg, strlen(bg_val_msg), 100);
-    } // end if
+        int16_t current_raw =
+            (int16_t)(
+                (uint16_t)current_data[0] |
+                ((uint16_t)current_data[1] << 8)
+            );
+
+        float stack_v = stack_raw * 0.01f;
+        float pack_v = pack_raw * 0.01f;
+
+        snprintf(
+            bq_status_msg,
+            sizeof(bq_status_msg),
+            "[BQ76942] Stack=%.2f V | Pack=%.2f V | "
+            "CurrentRaw=%d | SafetyA=0x%02X\r\n",
+            stack_v,
+            pack_v,
+            (int)current_raw,
+            (unsigned int)safety_a
+        );
+    }
     else
     {
-      snprintf(bg_val_msg, sizeof(bg_val_msg), "[BQ76942] Read FAILED: Stack=%.2f V, Pack=%.2f V, Current=%.2d mA, SaftyA=0x%04X, I2C_error=0x%08lX\r\n", (int)s1, (int)s2, (int)s3, (int)s4, (unsigned long)HAL_I2C_GetError(&hi2c2));
+        snprintf(
+            bq_status_msg,
+            sizeof(bq_status_msg),
+            "[BQ76942] READ/CRC FAILED: "
+            "Stack=%d Pack=%d Current=%d Safety=%d\r\n",
+            (int)s_stack,
+            (int)s_pack,
+            (int)s_current,
+            (int)s_safety
+        );
+    }
 
-      HAL_UART_Transmit(&huart3, (uint8_t *)bg_val_msg, strlen(bg_val_msg), 100);
-    } // end else
+    HAL_UART_Transmit(
+        &huart3,
+        (uint8_t *)bq_status_msg,
+        strlen(bq_status_msg),
+        100
+    );
 
+// ===== END: BQ76942 Battery Status Read =====
     HAL_Delay(100);
 
     // raw data diagnostic
