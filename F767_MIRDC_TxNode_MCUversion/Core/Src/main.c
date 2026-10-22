@@ -56,7 +56,9 @@ TIM_HandleTypeDef htim6;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+#define MPU6050_ADDR  (0x69 << 1)
 
+static uint8_t mpu_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,7 +78,80 @@ static void MX_USART3_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+HAL_StatusTypeDef MPU6050_Init(void)
+{
+  uint8_t value;
 
+  value = 0x01;
+
+  if (HAL_I2C_Mem_Write(&hi2c4, MPU6050_ADDR, 0x6B, I2C_MEMADD_SIZE_8BIT, &value, 1, 100) != HAL_OK)
+  {
+    return HAL_ERROR;
+  } // end if mem write 0x01 not OK
+
+  HAL_Delay(100);
+
+  // Digital Low-pass filter
+  value = 0x03;
+  if (HAL_I2C_Mem_Write(&hi2c4, MPU6050_ADDR, 0x1A, I2C_MEMADD_SIZE_8BIT, &value, 1, 100) != HAL_OK)
+  {
+    return HAL_ERROR;
+  } // end if mem write 0x03 not OK
+
+  HAL_Delay(100);
+
+  // Gyro
+  value = 0x00;
+  if (HAL_I2C_Mem_Write(&hi2c4, MPU6050_ADDR, 0x1B, I2C_MEMADD_SIZE_8BIT, &value, 1, 100) != HAL_OK)
+  {
+    return HAL_ERROR;
+  } // return if mem write gyro value not ok
+
+  HAL_Delay(100);
+
+  // ACC
+  value = 0x00;
+  if (HAL_I2C_Mem_Write(&hi2c4, MPU6050_ADDR, 0x1C, I2C_MEMADD_SIZE_8BIT, &value, 1, 100) != HAL_OK)
+  {
+    return HAL_ERROR;
+  } // return if mem write gyro value not ok
+
+  return HAL_OK;
+} // end function MPU6050_Init
+
+HAL_StatusTypeDef MPU6050_Read(float accel[3], float gyro[3], float *temperature)
+{
+  uint8_t data[14];
+
+  HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c4, MPU6050_ADDR, 0x3B, I2C_MEMADD_SIZE_8BIT, data, 14, 100);
+
+  if (status != HAL_OK)
+  {
+    return status;
+  } // end if status not ok
+
+  int16_t ax = (int16_t)((data[0] << 8) | data[1]);
+  int16_t ay = (int16_t)((data[2] << 8) | data[3]);
+  int16_t az = (int16_t)((data[4] << 8) | data[5]);
+
+  int16_t temp = (int16_t)((data[6] << 8) | data[7]);
+
+  int16_t gx = (int16_t)((data[8] << 8) | data[9]);
+  int16_t gy = (int16_t)((data[10] << 8) | data[11]);
+  int16_t gz = (int16_t)((data[12] << 8) | data[13]);
+
+  accel[0] = ax / 16384.0f;
+  accel[1] = ay / 16384.0f;
+  accel[2] = az / 16384.0f;
+
+  gyro[0] = gx / 131.0f;
+  gyro[1] = gy / 131.0f;
+  gyro[2] = gz / 131.0f;
+
+  *temperature = temp / 340.f + 36.53f;
+
+  return HAL_OK
+} // end function MPU6050_Read
 /* USER CODE END 0 */
 
 /**
@@ -130,8 +205,11 @@ int main(void)
 
   HAL_UART_Transmit(&huart3, (uint8_t *)uart_msg, sizeof(uart_msg) - 1, HAL_MAX_DELAY);
 
-  
+  // MPU6050 start up
+  mpu_ready = (MPU6050_Init() == HAL_OK);
+  const char *mpu_msg = mpu_ready ? "[MPU] Initialization OK\r\n" : "[MPU] Initialization FAILED\r\n";
 
+  HAL_UART_Transmit(&huart3, (uint8_t *)mpu_msg, strlen(mpu_msg), 100);
   /* USER CODE END 2 */
 
   /* Infinite loop */
