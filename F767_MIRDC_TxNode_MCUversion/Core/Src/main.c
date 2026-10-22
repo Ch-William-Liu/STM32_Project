@@ -59,6 +59,8 @@ UART_HandleTypeDef huart3;
 #define MPU6050_ADDR  (0x69 << 1)
 
 static uint8_t mpu_ready = 0;
+
+#define BQ76942_ADDR  (0x08 << 1)
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -286,6 +288,17 @@ int main(void)
         HAL_UART_Transmit(&huart3, (uint8_t *)err, sizeof(err) - 1, 100);
       } // end else
     } // end if mpu ready
+
+    // BQ
+    HAL_StatusTypeDef bq_status;
+
+    bq_status = HAL_I2C_IsDeviceReady(&hi2c2, BQ76942_ADDR, 3, 100);
+
+    char bq_msg[128];
+
+    snprintf(bq_msg, sizeof(bq_msg), "[BQ76942] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)bq_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
+
+    HAL_UART_Transmit(&huart3, (uint8_t *)bq_msg, strlen(bq_msg), 100);
 
     // delay after all
     HAL_Delay(1000);
