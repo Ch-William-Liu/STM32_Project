@@ -251,43 +251,6 @@ int main(void)
 
     HAL_Delay(100);
 
-    // DS3231 connection test
-    HAL_StatusTypeDef rtc_status;
-
-    rtc_status = HAL_I2C_IsDeviceReady(&hi2c2, (0x68 << 1), 3, 100);
-
-    char msg[128];
-
-    snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
-
-    HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
-
-    HAL_Delay(100);
-
-    // MPU connection test
-    HAL_StatusTypeDef mpu_status;
-
-    mpu_status = HAL_I2C_IsDeviceReady(&hi2c4, (0x69 << 1), 3, 100);
-  
-    char mpu_msg[128];
-  
-    snprintf(mpu_msg, sizeof(mpu_msg), "[MPU] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)mpu_status, (unsigned long)HAL_I2C_GetError(&hi2c4), (int)HAL_I2C_GetState(&hi2c4));
-  
-    HAL_UART_Transmit(&huart3, (uint8_t *)mpu_msg, strlen(mpu_msg), 100);
-
-    HAL_Delay(100);
-    
-    uint8_t who_am_i = 0;
-
-    HAL_StatusTypeDef who_status = HAL_I2C_Mem_Read(&hi2c4, (0x69 << 1), 0x75, I2C_MEMADD_SIZE_8BIT, &who_am_i, 1, 100);
-
-    char who_msg[100];
-
-    snprintf(who_msg, sizeof(who_msg), "[MPU] status=%d, WHO_AM_I=0x%02X, error=0x%08lX\r\n", (int)who_status, who_am_i, (unsigned long)HAL_I2C_GetError(&hi2c4));
-
-    HAL_UART_Transmit(&huart3, (uint8_t *)who_msg, strlen(who_msg), 100);
-
-    HAL_Delay(100);
 
     // print out 
     if (mpu_ready)
@@ -381,6 +344,30 @@ int main(void)
       HAL_UART_Transmit(&huart3, (uint8_t *)diag_msg, strlen(diag_msg), 100);
 
       HAL_Delay(20);
+    } // end for
+
+    char msg[128];
+    
+    for (uint8_t i=0; i<10; i++)
+    {
+      uint8_t data[2] = {0};
+
+      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, 0x14, I2C_MEMADD_SIZE_8BIT, data, 2, 100);
+
+      if (status == HAL_OK)
+      {
+        uint16_t little_endian = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+
+        uint16_t swapped = ((uint16_t)data[0] << 8) | (uint16_t)data[1];
+
+        snprintf(msg, sizeof(msg), "[BQ] #%u RAW=%02X %02X LE=%u SWAP=%u\r\n", i + 1, data[0], data[1], little_endian, swapped);
+      } // end if
+      else
+      {
+        snprintf(msg, sizeof(msg), "[BQ] #%u ERROR=%d I2C=0x%08lX\r\n", i + 1, status, (unsigned long)HAL_I2C_GetError(&hi2c2));
+      } // end else
+
+      HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
     } // end for
 
     // delay after all
