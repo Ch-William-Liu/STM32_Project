@@ -339,6 +339,8 @@ int main(void)
       int16_t current = (int16_t)current_raw;
 
       snprintf(bg_val_msg, sizeof(bg_val_msg), "[BQ76942] Stack=%.2f V, Pack=%.2f V, Current=%.2d mA, SaftyA=0x%04X\r\n", stack_voltage, pack_voltage, (int)current, (unsigned long)safty_raw);
+
+      HAL_UART_Transmit(&huart3, (uint8_t *)bg_val_msg, strlen(bg_val_msg), 100);
     } // end if
     else
     {
