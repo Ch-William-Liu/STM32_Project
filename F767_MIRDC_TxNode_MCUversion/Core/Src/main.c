@@ -357,22 +357,30 @@ int main(void)
     HAL_Delay(100);
 
     // raw data diagnostic
-    const uint8_t commands[] = {0x34, 0x36, 0x3A, 0x03};
+    const uint8_t commands[] = {0x14, 0x16, 0x18, 0x1A, 0x1C, 0x1E, 0x20, 0x22, 0x24, 0x26, 0x34, 0x36};
 
     char diag_msg[128];
 
-    for (uint8_t i=0; i<4; i++)
+    for (uint8_t i=0; i<sizeof(commands); i++)
     {
       uint8_t data[2] = {0};
 
-      HAL_StatusTypeDef status = BQ76942_Raw(commands[i], data);
+      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, commands[i], I2C_MEMADD_SIZE_8BIT, data, 2, 100);
 
-      
-    snprintf(diag_msg, sizeof(diag_msg), "[BQ] CMD=0x%02X, status=%d, RAW=%02X %02X, error=0x%08lX\r\n", commands[i], (int)status, data[0], data[1], (unsigned long)HAL_I2C_GetError(&hi2c2));
+      if (status == HAL_OK)
+      {
+        uint16_t raw = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+
+        snprintf(diag_msg, sizeof(diag_msg), "[BQ] CMD=0x%02X RAW=%02X %02X VALUE=%u\r\n", commands[i], data[0], data[1], raw);
+      } // end if 
+      else
+      {
+        snprintf(diag_msg, sizeof(diag_msg), "[BQ] CMD=0x%02X READ FAILED, error=0x%08lX\r\n", commands[i], (unsigned long)HAL_I2C_GetError(&hi2c2));
+      } // end else
 
       HAL_UART_Transmit(&huart3, (uint8_t *)diag_msg, strlen(diag_msg), 100);
 
-      HAL_Delay(100);
+      HAL_Delay(20);
     } // end for
 
     // delay after all
