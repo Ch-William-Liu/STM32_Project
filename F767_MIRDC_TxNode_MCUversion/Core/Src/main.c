@@ -263,6 +263,30 @@ int main(void)
 
     HAL_UART_Transmit(&huart3, (uint8_t *)who_msg, strlen(who_msg), 100);
 
+    HAL_Delay(100);
+
+    // print out 
+    if (mpu_ready)
+    {
+      float accel[3];
+      float gyro[3];
+      float temperature;
+      
+      if (MPU6050_Read(accel, gyro, &temperature) == HAL_OK)
+      {
+        char msg[256];
+
+        snprintf(msg, sizeof(msg), "[MPU] ACC: X=%.2f,Y=%.2f,Z=%.2f g | GYRO: X=%.2f,Y=%.2f,Z=%.2f g | TEMP=%.2f C\r\n", accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], temperature);
+
+        HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
+      } // end read MPU6050
+      else
+      {
+        const char err[] = "[MPU] Read FAILED\r\n";
+        HAL_UART_Transmit(&huart3, (uint8_t *)err, sizeof(err) - 1, 100);
+      } // end else
+    } // end if mpu ready
+
     // delay after all
     HAL_Delay(1000);
   }
