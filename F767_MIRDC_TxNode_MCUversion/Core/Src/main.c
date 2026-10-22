@@ -370,6 +370,24 @@ int main(void)
       HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
     } // end for
 
+    uint8_t mem_data[2] = {0};
+    uint8_t tx_cmd = 0x14;
+    uint8_t rx_data[2] = {0};
+
+    HAL_StatusTypeDef s_mem = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, 0x14, I2C_MEMADD_SIZE_8BIT, mem_data, 2, 100);
+    HAL_StatusTypeDef s_tx = HAL_I2C_Master_Transmit(&hi2c2, BQ76942_ADDR, &tx_cmd, 1, 100);
+    HAL_StatusTypeDef s_rx = HAL_ERROR;
+
+    if (s_tx == HAL_OK)
+    {
+      s_rx = HAL_I2C_Master_Receive(&hi2c2, BQ76942_ADDR, rx_data, 2, 100);
+    } // end if s_tx OK
+
+    char bq_compare_msg[160];
+
+    snprintf(bq_compare_msg, sizeof(bq_compare_msg), "[BQ TEST] MEM=%d RAW=%02X %02X | TX=%d RX=%d RAW=%02X %02x\r\n", (int)s_mem, mem_data[0], mem_data[1], (int)s_tx, (int)s_rx, rx_data[0], rx_data[1]);
+
+    HAL_UART_Transmit(&huart3, (uint8_t *)bq_compare_msg, strlen(bq_compare_msg), 100);
     // delay after all
     HAL_Delay(1000);
   }
