@@ -171,6 +171,11 @@ HAL_StatusTypeDef BQ76942_Read16(uint16_t command, uint16_t *value)
 
   return HAL_OK;
 } // end function BQ76942_Read16
+
+HAL_StatusTypeDef BQ76942_Raw(uint8_t command, uint8_t data[2])
+{
+  return HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, command, I2C_MEMADD_SIZE_8BIT, data, 2, 100);
+} // end function BQ76942_Raw
 /* USER CODE END 0 */
 
 /**
@@ -348,6 +353,27 @@ int main(void)
 
       HAL_UART_Transmit(&huart3, (uint8_t *)bg_val_msg, strlen(bg_val_msg), 100);
     } // end else
+
+    HAL_Delay(100);
+
+    // raw data diagnostic
+    const uint8_t commands[] = {0x34, 0x36, 0x3A, 0x03};
+
+    char diag_msg[128];
+
+    for (uint8_t i=0; i<4; i++)
+    {
+      uint8_t data[2] = {0};
+
+      HAL_StatusTypeDef status = BQ76942_Raw(commands[i], data);
+
+      
+    snprintf(diag_msg, sizeof(diag_msg), "[BQ] CMD=0x%02X, status=%d, RAW=%02X %02X, error=0x%08lX\r\n", commands[i], (int)status, data[0], data[1], (unsigned long)HAL_I2C_GetError(&hi2c2));
+
+      HAL_UART_Transmit(&huart3, (uint8_t *)diag_msg, strlen(diag_msg), 100);
+
+      HAL_Delay(100);
+    } // end for
 
     // delay after all
     HAL_Delay(1000);
