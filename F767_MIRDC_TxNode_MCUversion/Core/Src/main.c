@@ -278,7 +278,7 @@ int main(void)
 
         snprintf(val_msg, sizeof(val_msg), "[MPU] ACC: X=%.2f,Y=%.2f,Z=%.2f g | GYRO: X=%.2f,Y=%.2f,Z=%.2f g | TEMP=%.2f C\r\n", accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], temperature);
 
-        HAL_UART_Transmit(&huart3, (uint8_t *)val_msg, strlen(msval_msgg), 100);
+        HAL_UART_Transmit(&huart3, (uint8_t *)val_msg, strlen(val_msg), 100);
       } // end read MPU6050
       else
       {
