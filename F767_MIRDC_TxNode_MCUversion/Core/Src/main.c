@@ -176,6 +176,80 @@ HAL_StatusTypeDef BQ76942_Raw(uint8_t command, uint8_t data[2])
 {
   return HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, command, I2C_MEMADD_SIZE_8BIT, data, 2, 100);
 } // end function BQ76942_Raw
+
+static uint8_t BQ76942_CRC8(const uint8_t *data, uint8_t len)
+{
+  uint8_t crc = 0x00;
+
+  for (uint8_t i = 0; i < len; i++)
+  {
+    crc ^= data[i];
+
+    for (uint8_t bit = 0; bit < 8; bit++)
+    {
+      if (crc & 0x80)
+        crc = (uint8_t)((crc << 1) ^ 0x07);
+      else
+        crc = (uint8_t)(crc << 1);
+    } // end for
+  } // end for
+
+  return crc;
+} // end function BQ76942_CRC8
+
+
+HAL_StatusTypeDef BQ76942_ReadCRC(
+    uint8_t command,
+    uint8_t *data,
+    uint8_t data_len)
+{
+  if (data == NULL || data_len == 0 || data_len > 16)
+    return HAL_ERROR;
+
+  uint8_t rx[32] = {0};
+
+  HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+    &hi2c2,
+    BQ76942_ADDR,
+    command,
+    I2C_MEMADD_SIZE_8BIT,
+    rx,
+    (uint16_t)(data_len * 2),
+    100
+  );
+
+  if (status != HAL_OK)
+    return status;
+
+  for (uint8_t i = 0; i < data_len; i++)
+  {
+    uint8_t expected_crc;
+
+    if (i == 0)
+    {
+      uint8_t crc_input[4] = {
+        (uint8_t)BQ76942_ADDR,
+        command,
+        (uint8_t)(BQ76942_ADDR | 0x01),
+        rx[0]
+      };
+
+      expected_crc = BQ76942_CRC8(crc_input, 4);
+    }
+    else
+    {
+      expected_crc = BQ76942_CRC8(&rx[i * 2], 1);
+    }
+
+    if (expected_crc != rx[i * 2 + 1])
+      return HAL_ERROR;
+  }
+
+  for (uint8_t i = 0; i < data_len; i++)
+    data[i] = rx[i * 2];
+
+  return HAL_OK;
+}
 /* USER CODE END 0 */
 
 /**
@@ -279,13 +353,50 @@ int main(void)
 
     bq_status = HAL_I2C_IsDeviceReady(&hi2c2, BQ76942_ADDR, 3, 100);
 
+
     char bq_msg[128];
 
-    snprintf(bq_msg, sizeof(bq_msg), "[BQ76942] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)bq_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
+    for (uint8_t cell = 0; cell < 7; cell++)
+    {
+        uint8_t command = 0x14 + cell * 2;
+        uint8_t data[2] = {0};
 
-    HAL_UART_Transmit(&huart3, (uint8_t *)bq_msg, strlen(bq_msg), 100);
+        HAL_StatusTypeDef status =
+            BQ76942_ReadCRC(command, data, 2);
 
-    HAL_Delay(100);
+        if (status == HAL_OK)
+        {
+            int16_t voltage_mv =
+                (int16_t)((uint16_t)data[0] |
+                          ((uint16_t)data[1] << 8));
+
+            snprintf(
+                bq_msg,
+                sizeof(bq_msg),
+                "[BQ76942] Cell %u = %d mV\r\n",
+                (unsigned int)(cell + 1),
+                (int)voltage_mv
+            );
+        }
+        else
+        {
+            snprintf(
+                bq_msg,
+                sizeof(bq_msg),
+                "[BQ76942] Cell %u READ/CRC FAILED\r\n",
+                (unsigned int)(cell + 1)
+            );
+        }
+
+        HAL_UART_Transmit(
+            &huart3,
+            (uint8_t *)bq_msg,
+            strlen(bq_msg),
+            100
+        );
+    }
+
+
 
     // battery status
     uint16_t stack_raw = 0;
@@ -377,6 +488,7 @@ int main(void)
 
     HAL_Delay(1000);
   }
+
 
 
   /* USER CODE END 3 */
