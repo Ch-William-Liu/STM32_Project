@@ -154,6 +154,23 @@ HAL_StatusTypeDef MPU6050_Read(float accel[3], float gyro[3], float *temperature
 
   return HAL_OK;
 } // end function MPU6050_Read
+
+HAL_StatusTypeDef BQ76942_Read16(uint16_t command, uint16_t *value)
+{
+  uint8_t data[2];
+
+  HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, command, I2C_MEMADD_SIZE_8BIT, data, 2, 100);
+
+  if (status != HAL_OK)
+  {
+    return status;
+  } // end if ok
+
+  // use little-edian data
+  *value = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+
+  return HAL_OK;
+} // end function BQ76942_Read16
 /* USER CODE END 0 */
 
 /**
@@ -299,6 +316,36 @@ int main(void)
     snprintf(bq_msg, sizeof(bq_msg), "[BQ76942] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)bq_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
 
     HAL_UART_Transmit(&huart3, (uint8_t *)bq_msg, strlen(bq_msg), 100);
+
+    HAL_Delay(100);
+
+    // battery status
+    uint16_t stack_raw = 0;
+    uint16_t pack_raw = 0;
+    uint16_t current_raw = 0;
+    uint16_t safty_raw = 0;
+
+    HAL_StatusTypeDef s1 = BQ76942_Read16(0x34, &stack_raw);
+    HAL_StatusTypeDef s2 = BQ76942_Read16(0x36, &pack_raw);
+    HAL_StatusTypeDef s3 = BQ76942_Read16(0x3A, &current_raw);
+    HAL_StatusTypeDef s4 = BQ76942_Read16(0x03, &safty_raw);
+
+    char bg_val_msg[256];
+
+    if (s1 == HAL_OK && s2 == HAL_OK && s3== HAL_OK && s4 == HAL_OK)
+    {
+      float stack_voltage = stack_raw * 0.01f;
+      float pack_voltage = pack_raw * 0.01f;
+      int16_t current = (int16_t)current_raw;
+
+      snprintf(bg_val_msg, sizeof(bg_val_msg), "[BQ76942] Stack=%.2f V, Pack=%.2f V, Current=%.2d mA, SaftyA=0x%04X\r\n", stack_voltage, pack_voltage, (int)current, (unsigned long)safty_raw);
+    } // end if
+    else
+    {
+      snprintf(bg_val_msg, sizeof(bg_val_msg), "[BQ76942] Read FAILED: Stack=%.2f V, Pack=%.2f V, Current=%.2d mA, SaftyA=0x%04X, I2C_error=0x%08lX\r\n", (int)s1, (int)s2, (int)s3, (int)s4, (unsigned long)HAL_I2C_GetError(&hi2c2));
+
+      HAL_UART_Transmit(&huart3, (uint8_t *)bg_val_msg, strlen(bg_val_msg), 100);
+    } // end else
 
     // delay after all
     HAL_Delay(1000);
