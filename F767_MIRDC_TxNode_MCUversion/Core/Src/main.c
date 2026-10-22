@@ -150,7 +150,7 @@ HAL_StatusTypeDef MPU6050_Read(float accel[3], float gyro[3], float *temperature
 
   *temperature = temp / 340.f + 36.53f;
 
-  return HAL_OK
+  return HAL_OK;
 } // end function MPU6050_Read
 /* USER CODE END 0 */
 
