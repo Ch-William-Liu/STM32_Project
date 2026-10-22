@@ -130,15 +130,7 @@ int main(void)
 
   HAL_UART_Transmit(&huart3, (uint8_t *)uart_msg, sizeof(uart_msg) - 1, HAL_MAX_DELAY);
 
-  HAL_StatusTypeDef rtc_status;
-
-  rtc_status = HAL_I2C_IsDeviceReady(&hi2c2, (0x68 << 1), 3, 100);
-
-  char msg[128];
-
-  snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
-
-  HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 1000);
+  
 
   /* USER CODE END 2 */
 
@@ -155,6 +147,22 @@ int main(void)
 
     HAL_UART_Transmit(&huart3, (uint8_t *)test_msg, sizeof(test_msg) - 1, 100);
 
+    HAL_Delay(100);
+
+    // DS3231 connection test
+    HAL_StatusTypeDef rtc_status;
+
+    rtc_status = HAL_I2C_IsDeviceReady(&hi2c2, (0x68 << 1), 3, 100);
+
+    char msg[128];
+
+    snprintf(msg, sizeof(msg), "[RTC] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)rtc_status, (unsigned long)HAL_I2C_GetError(&hi2c2), (int)HAL_I2C_GetState(&hi2c2));
+
+    HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
+
+    HAL_Delay(100);
+
+    // MPU connection test
     HAL_StatusTypeDef mpu_status;
 
     mpu_status = HAL_I2C_IsDeviceReady(&hi2c4, (0x69 << 1), 3, 100);
@@ -165,7 +173,20 @@ int main(void)
   
     HAL_UART_Transmit(&huart3, (uint8_t *)mpu_msg, strlen(mpu_msg), 100);
 
-    HAL_Delay(10000);
+    HAL_Delay(100);
+    
+    uint8_t who_am_i = 0;
+
+    HAL_StatusTypeDef mpu_status = HAL_I2C_Mem_Read(&hi2c4, (0x69 << 1), 0x75, I2C_MEMADD_SIZE_8BIT, &who_am_i, 1, 100);
+
+    char who_msg[100];
+
+    snprintf(who_msg, sizeof(who_msg), "[MPU] status=%d, WHO_AM_I=0x%02X, error=0x%08lX\r\n", (int)mpu_status, who_am_i, (unsigned long)HAL_I2C_GetError(&hi2c4));
+
+    HAL_UART_Transmit(&huart3, (uint8_t *)who_msg, strlen(who_msg), 100);
+
+    // delay after all
+    HAL_Delay(1000);
   }
 
 
