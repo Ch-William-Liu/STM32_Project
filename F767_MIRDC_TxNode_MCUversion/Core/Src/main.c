@@ -346,30 +346,6 @@ int main(void)
       HAL_Delay(20);
     } // end for
 
-    char msg[128];
-    
-    for (uint8_t i=0; i<10; i++)
-    {
-      uint8_t data[2] = {0};
-
-      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, 0x14, I2C_MEMADD_SIZE_8BIT, data, 2, 100);
-
-      if (status == HAL_OK)
-      {
-        uint16_t little_endian = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-
-        uint16_t swapped = ((uint16_t)data[0] << 8) | (uint16_t)data[1];
-
-        snprintf(msg, sizeof(msg), "[BQ] #%u RAW=%02X %02X LE=%u SWAP=%u\r\n", i + 1, data[0], data[1], little_endian, swapped);
-      } // end if
-      else
-      {
-        snprintf(msg, sizeof(msg), "[BQ] #%u ERROR=%d I2C=0x%08lX\r\n", i + 1, status, (unsigned long)HAL_I2C_GetError(&hi2c2));
-      } // end else
-
-      HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
-    } // end for
-
     uint8_t mem_data[2] = {0};
     uint8_t tx_cmd = 0x14;
     uint8_t rx_data[2] = {0};
@@ -389,6 +365,16 @@ int main(void)
 
     HAL_UART_Transmit(&huart3, (uint8_t *)bq_compare_msg, strlen(bq_compare_msg), 100);
     // delay after all
+
+    uint8_t bq_data[4] = {0};
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, BQ76942_ADDR, 0x14, I2C_MEMADD_SIZE_8BIT, bq_data, 4, 100);
+
+    char msg[128];
+
+    snprintf(msg, sizeof(msg), "[BQ CRC] status=%d RAW=%02X %02X %02X %02X\r\n", (int)status, bq_data[0], bq_data[1], bq_data[2], bq_data[3]);
+
+    HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), 100);
+
     HAL_Delay(1000);
   }
 
