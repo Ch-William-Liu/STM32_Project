@@ -397,9 +397,7 @@ int main(void)
     }
 
 
-
     // battery status
-    // ===== START: BQ76942 Battery Status Read =====
 
     uint8_t stack_data[2] = {0};
     uint8_t pack_data[2] = {0};
@@ -474,7 +472,6 @@ int main(void)
         100
     );
 
-// ===== END: BQ76942 Battery Status Read =====
     HAL_Delay(100);
 
     // raw data diagnostic
@@ -536,7 +533,44 @@ int main(void)
     HAL_Delay(1000);
   }
 
+  uint8_t fet_status = 0;
+  uint8_t safety_a = 0;
+  uint8_t safety_b = 0;
+  uint8_t safety_c = 0;
 
+  HAL_StatusTypeDef s_fet =
+      BQ76942_ReadCRC(0x7F, &fet_status, 1);
+
+  HAL_StatusTypeDef s_a =
+      BQ76942_ReadCRC(0x03, &safety_a, 1);
+
+  HAL_StatusTypeDef s_b =
+      BQ76942_ReadCRC(0x05, &safety_b, 1);
+
+  HAL_StatusTypeDef s_c =
+      BQ76942_ReadCRC(0x07, &safety_c, 1);
+
+  char bq_fet_msg[160];
+
+  snprintf(
+      bq_fet_msg,
+      sizeof(bq_fet_msg),
+      "[BQ STATUS] FET=%d:0x%02X | "
+      "SafetyA=%d:0x%02X | "
+      "SafetyB=%d:0x%02X | "
+      "SafetyC=%d:0x%02X\r\n",
+      (int)s_fet, fet_status,
+      (int)s_a, safety_a,
+      (int)s_b, safety_b,
+      (int)s_c, safety_c
+  );
+
+  HAL_UART_Transmit(
+      &huart3,
+      (uint8_t *)bq_fet_msg,
+      strlen(bq_fet_msg),
+      100
+  );
 
   /* USER CODE END 3 */
 }
