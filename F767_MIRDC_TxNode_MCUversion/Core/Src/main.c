@@ -177,11 +177,11 @@ int main(void)
     
     uint8_t who_am_i = 0;
 
-    HAL_StatusTypeDef mpu_status = HAL_I2C_Mem_Read(&hi2c4, (0x69 << 1), 0x75, I2C_MEMADD_SIZE_8BIT, &who_am_i, 1, 100);
+    HAL_StatusTypeDef who_status = HAL_I2C_Mem_Read(&hi2c4, (0x69 << 1), 0x75, I2C_MEMADD_SIZE_8BIT, &who_am_i, 1, 100);
 
     char who_msg[100];
 
-    snprintf(who_msg, sizeof(who_msg), "[MPU] status=%d, WHO_AM_I=0x%02X, error=0x%08lX\r\n", (int)mpu_status, who_am_i, (unsigned long)HAL_I2C_GetError(&hi2c4));
+    snprintf(who_msg, sizeof(who_msg), "[MPU] status=%d, WHO_AM_I=0x%02X, error=0x%08lX\r\n", (int)who_status, who_am_i, (unsigned long)HAL_I2C_GetError(&hi2c4));
 
     HAL_UART_Transmit(&huart3, (uint8_t *)who_msg, strlen(who_msg), 100);
 
