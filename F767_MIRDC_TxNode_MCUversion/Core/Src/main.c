@@ -155,8 +155,20 @@ int main(void)
 
     HAL_UART_Transmit(&huart3, (uint8_t *)test_msg, sizeof(test_msg) - 1, 100);
 
+    HAL_StatusTypeDef mpu_status;
+
+    mpu_status = HAL_I2C_IsDeviceReady(&hi2c4, (0x69 << 1), 3, 100);
+  
+    char mpu_msg[128];
+  
+    snprintf(mpu_msg, sizeof(mpu_msg), "[MPU] status=%d, I2C_error=0x%08lX, I2C_state=%d\r\n", (int)mpu_status, (unsigned long)HAL_I2C_GetError(&hi2c4), (int)HAL_I2C_GetState(&hi2c4));
+  
+    HAL_UART_Transmit(&huart3, (uint8_t *)mpu_msg, strlen(mpu_msg), 100);
+
     HAL_Delay(10000);
   }
+
+
   /* USER CODE END 3 */
 }
 
